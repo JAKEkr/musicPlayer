@@ -171,7 +171,7 @@ int audio_decode_frame(audio_entry *is)
                     return AVERROR(ENOMEM);
                 }
             } else 
-                avcodec_get_frame_defaults(is->frame);
+                av_frame_unref(is->frame);
 
             len1 = avcodec_decode_audio4(is->stream->codec, is->frame, &got_frame,  pkt);
             if (len1 < 0) {
