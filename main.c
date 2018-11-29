@@ -167,7 +167,7 @@ int audio_decode_frame(audio_entry *is)
     for (;;) {
         while (is->packet_size > 0) {
             if (!is->frame) {
-                if (!(is->frame = avcodec_alloc_frame())) {
+                if (!(is->frame = av_frame_alloc())) {
                     return AVERROR(ENOMEM);
                 }
             } else 
