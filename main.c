@@ -399,11 +399,20 @@ static void stream_component_close(VideoState *is, int stream_index) {
 
 }
 */
+
+/*
+ * static int decode_thread(void *);
+ * 
+ * 전달 받은 파일을 오픈하고 헤더 정보를 가져온 뒤, 오디오 코덱이 있는 스트림을 찾아 오디오를
+ * 재생시키는 별도의 쓰레드를 동작시킨 후, 해당 스트림과 일치하는 패킷을 찾아 오디오 큐에 입력하는 함수.
+ * 
+ * 리턴값: 정상적인 종료시 0, 에러 혹은 충돌에 의한 비정상적인 종료시 -1
+ */
 static int decode_thread(void *arg)
 {
     audio_entry *is = (audio_entry *)arg;
     AVFormatContext *ic = NULL;
-    AVPacket pkt1, *packet = &pkt1;
+    AVPacket pkt1, *packet = &pkt1; // TODO: pk1은 사용되지 않는 변수로 지울 것
     int ret, i, audio_index = -1;
 
     is->stream_index=-1;
@@ -412,34 +421,45 @@ static int decode_thread(void *arg)
 
     if (avformat_open_input(&ic, is->filename, NULL, NULL) != 0) {
         return -1;
-    }
+    } // 해당 오디오 파일을 오픈하고, 전달한 AVFormatContext 구조체 주소에 헤더 정보 저장
+
     is->context = ic;
+
     if (avformat_find_stream_info(ic, NULL) < 0) {
         return -1;
-    }
-    av_dump_format(ic, 0, is->filename, 0);
+    } // 오디오 헤더로부터 스트림 정보 검색
+
+    av_dump_format(ic, 0, is->filename, 0); // 디버깅을 위해 파일의 헤더 정보를 표준 에러로 덤프
+
     for (i=0; i<ic->nb_streams; i++) {
         if (ic->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO && audio_index < 0) {
             audio_index=i;
             break;
         }
-    }
+    } // 오디오 코덱이 존재하는 스트림 인덱스 번호 탐색
+
     if (audio_index >= 0) {
         stream_component_open(is, audio_index);
-    }
+    } // 추가 설정 후, 별도의 쓰레드로 오디오 재생
+
     if (is->stream_index < 0) {
         fprintf(stderr, "%s: could not open codecs\n", is->filename);
-        goto fail;
+        goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
     }
+
     // main decode loop
     for(;;) {
-        if(is->state) break;
+        if(is->state) break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
+
         if (is->queue.size > MAX_AUDIOQ_SIZE) {
             SDL_Delay(10);
             continue;
-        }
+        } // 오디오 패킷 큐의 오버플로우 검사
+
         ret = av_read_frame(is->context, packet);
+
         if (ret < 0) {
+            // TODO: if & continue 문 간략하게 만들 것
             if(ret == AVERROR_EOF || url_feof(is->context->pb)) {
                 break;
             }
@@ -447,25 +467,25 @@ static int decode_thread(void *arg)
                 break;
             }
             continue;
-        }
+        } // 실패 요인에 파일의 끝 혹은 타 에러 발생 여부 검사
 
         if (packet->stream_index == is->stream_index) {
             packet_queue_put(&is->queue, packet);
         } else {
             av_free_packet(packet);
-        }
+        } // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
     while (!is->state) {
         SDL_Delay(100);
-    }
+    } // 다른 쓰레드와 종료 시점 동기화
 
 fail: {
         SDL_Event event;
         event.type = FF_QUIT_EVENT;
         event.user.data1 = is;
         SDL_PushEvent(&event);
-    }
+    } // 오디오 스트림 탐색 실패시 메인 쓰레드로 종료 이벤트 전달
 
     return 0;
 }
