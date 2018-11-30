@@ -1,4 +1,4 @@
-#include <libavcodec/avcodec.h>
+﻿#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
@@ -267,35 +267,41 @@ int audio_decode_frame(audio_entry *is)
         is->packet_size = pkt->size;
     }
 }
-
 void audio_callback(void *userdata, Uint8 *stream, int len)
 {
-    audio_entry *is = (audio_entry *)userdata;
-    int len1, audio_data_size;
+	/*
+	다른 함수로 부터 데이터를 끌어오는 간단한 루프로써
+	이 함수는 오디오 디바이스에 출력할 데이터가 필요하면
+	SDL_thread에서 콜백함수가 호출되고 stream에 필요한 만큼의 데이터를
+	디코딩하여 전달하기 위해 사용된다.
+	*/
+    audio_entry *is = (audio_entry *)userdata; //audio_entry 구조체 포인터 "is"에 stream을 통해 넘어온 void 포인터 userdata가 가리키는 audio 포인터 구조체 할당
+    int len1, audio_data_size; //넘길 버퍼의 길이 "len1", 디코딩 된 프레임 크기가 저장될 "audio_data_size" 변수 선언
 
-    while (len > 0) {
-        if (is->buffer_index >= is->buffer_size) {
-            audio_data_size = audio_decode_frame(is);
+    while (len > 0) { //stream을 통해 전송되온 버퍼 내 바이트의 길이 "len"이 0보다 크면 루프
+        if (is->buffer_index >= is->buffer_size) { //인덱스가 사이즈보다 크면
+            audio_data_size = audio_decode_frame(is); // "is"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
 
-            if(audio_data_size < 0) {
+            if(audio_data_size < 0) {//만약 데이터 사이즈가 0보다 작으면
                 /* silence */
-                is->buffer_size = 1024;
-                memset(is->buffer, 0, is->buffer_size);
+                is->buffer_size = 1024; // "is"의 buffer_size 인자를 1024로 설정
+                memset(is->buffer, 0, is->buffer_size); //"is"의 buffer인자의 시작주소부터 "is"의 buffer_size인자만큼 0으로 초기화한다.
             } else {
-                is->buffer_size = audio_data_size;
+                is->buffer_size = audio_data_size; //"is"의 buffer_size인자에 audio_data_size를 대입한다.
             }
-            is->buffer_index = 0;
+            is->buffer_index = 0; //"is"의 buffer_size인자에 audio_data_size를 대입한다.
         }
 
-        len1 = is->buffer_size - is->buffer_index;
-        if (len1 > len) {
-            len1 = len;
+        len1 = is->buffer_size - is->buffer_index; //넘겨줄 버퍼의 길이 "len1"에 "is"의 buffer_size 인자 = buffer_index인자를 대입한다.
+        if (len1 > len) { //넘겨줄 버퍼의 길이 "len1"이 stream의 전송량의 길이 "len"보다 큰 경우
+            len1 = len; //넘겨줄 버퍼의 길이 len1을 stream의 전송량의 길이 len만큼으로 고정한다.
         }
 
-        memcpy(stream, (uint8_t *)is->buffer + is->buffer_index, len1);
-        len -= len1;
-        stream += len1;
-        is->buffer_index += len1;
+        memcpy(stream, (uint8_t *)is->buffer + is->buffer_index, len1); /* stream에 "is"의 buffer_index+버퍼 위치부터 len1만큼의 길이만큼 버퍼를 복사
+									즉, stream에 "is"에 저장된 버퍼의 내용을 len1만큼 전송*/
+        len -= len1; //다음에 전송할 길이 "len"을 이번에 전송한 길이 "len1"만큼 빼준다.
+        stream += len1; //stream의 포인터를 이번에 전송한 길이 len1만큼 증가
+        is->buffer_index += len1; //"is"의 buffer_index 인자를 이번에 전송한 길이 len1만큼 증가
     }
 }
 
