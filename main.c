@@ -207,7 +207,7 @@ int audio_decode_frame(audio_entry *audio)
 			// 메모리 할당 여부 판단
             if (!audio->frame) {
 				// 메모리 할당
-                if (!(audio->frame = av_frame_alloc()))
+                if (!(audio->frame = avcodec_alloc_frame()))
                     return AVERROR(ENOMEM);
             } else // audio_frame을 default 값들로 초기화
                 av_frame_unref(audio->frame);
@@ -457,7 +457,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
         fprintf(stderr, "Unsupported codec!\n");
         return;
     }
-    
+
 	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
     switch(codec_ctx->codec_type) {
     case AVMEDIA_TYPE_AUDIO:					//패킷 생성을 위한 각종 초기화
