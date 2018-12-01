@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <math.h>
 
-#define SDL_AUDIO_BUFFER_SIZE 1024 
+#define SDL_AUDIO_BUFFER_SIZE 1024
 #define MAX_AUDIOQ_SIZE (1 * 1024 * 1024)
 #define FF_ALLOC_EVENT   (SDL_USEREVENT)
 #define FF_REFRESH_EVENT (SDL_USEREVENT + 1)
@@ -170,7 +170,7 @@ int audio_decode_frame(audio_entry *is)
                 if (!(is->frame = av_frame_alloc())) {
                     return AVERROR(ENOMEM);
                 }
-            } else 
+            } else
                 av_frame_unref(is->frame);
 
             len1 = avcodec_decode_audio4(is->stream->codec, is->frame, &got_frame,  pkt);
@@ -183,7 +183,7 @@ int audio_decode_frame(audio_entry *is)
             is->packet_data += len1;
             is->packet_size -= len1;
 
-            if (!got_frame) 
+            if (!got_frame)
                 continue;
 
             decoded_data_size = av_samples_get_buffer_size(NULL,
@@ -224,7 +224,7 @@ int audio_decode_frame(audio_entry *is)
             }
             if (is->swr_ctx) {
                // const uint8_t *in[] = { is->frame->data[0] };
-                const uint8_t **in = (const uint8_t **)is->frame->extended_data; 
+                const uint8_t **in = (const uint8_t **)is->frame->extended_data;
                 uint8_t *out[] = { is->temp_buffer };
 				if (wanted_nb_samples != is->frame->nb_samples) {
 					 if (swr_set_compensation(is->swr_ctx, (wanted_nb_samples - is->frame->nb_samples)
@@ -312,14 +312,14 @@ int stream_component_open(audio_entry *is, int stream_index)
     if (stream_index < 0 || stream_index >= ic->nb_streams) {
         return -1;
     }
-	
+
     codecCtx = ic->streams[stream_index]->codec;
 	wanted_nb_channels = codecCtx->channels;
 	if(!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) {
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
-	
+
 	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
 	wanted_spec.freq = codecCtx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {
@@ -331,7 +331,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;
 	wanted_spec.callback = audio_callback;
 	wanted_spec.userdata = is;
-	
+
 	while(SDL_OpenAudio(&wanted_spec, &spec) < 0) {
 		fprintf(stderr, "SDL_OpenAudio (%d channels): %s\n", wanted_spec.channels, SDL_GetError());
 		wanted_spec.channels = next_nb_channels[FFMIN(7, wanted_spec.channels)];
@@ -368,7 +368,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	is->source_samplerate = is->target_samplerate = spec.freq;
 	is->source_channel_layout = is->target_channel_layout = wanted_channel_layout;
 	is->source_channels = is->target_channels = spec.channels;
-    
+
     codec = avcodec_find_decoder(codecCtx->codec_id);
     if (!codec || (avcodec_open2(codecCtx, codec, NULL) < 0)) {
         fprintf(stderr, "Unsupported codec!\n");
@@ -472,27 +472,35 @@ fail: {
 
 int main(int argc, char **argv)
 {
-    SDL_Event event;
-    audio_entry *audio;
+  /*프로그램의 메인함수이며 전체적인 프로그램의 구동을 시작하는 함수이다.
+  리눅스 터미널 내부에서 파일명과 오디오파일명을 매개변수(argv)로 받고
+  SDL_Thread를 생성해 음악파일을 재생하고 그 후 SDL_Event를 기다리는 루프에 빠지며
+  SDL_QUIT라는 이벤트 타입을 감지하게되면 프로그램을 종료한다.
+  */
+    SDL_Event event; //SDL_Event "event" 선언
+    audio_entry *audio; //오디오에 대한 정보를 담고있는 audio_entry 구조체의 사이즈 만큼 동적할당
 
-    audio = (audio_entry *)av_mallocz(sizeof(audio_entry));
+    audio = (audio_entry *)av_mallocz(sizeof(audio_entry)); //"audio"에 audio_entry 구조체의 사이즈만큼 동적할당
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: test <file>\n");
+        fprintf(stderr, "Usage: test <file>\n"); //사용법 안내메시지 출력
         exit(1);
     }
 
-    av_register_all();
+    av_register_all();/* 모든 libavformat을 초기화하고 muxers, demuxers, protocols 등
+                      오디오 재생에 필요한 요소들을 등록하고 내부의 avcodec_register_all()을 실행한다.
+                      avcodec_register_all()은 codecs, parser, bit stream filter등 오디오 코덱 관련 요소등을 등록한다.*/
 
-    if (SDL_Init(SDL_INIT_AUDIO)) {
-        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
+    if (SDL_Init(SDL_INIT_AUDIO)) { //SDL 오디오 서브스트림을 초기화한다. 만약 초기화하는데 실패하면 1을 반환한다.
+        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError()); //SDL을 초기화 할 수 없었다는 에러 메시지 출력
         exit(1);
     }
 
-    av_strlcpy(audio->filename, argv[1], sizeof(audio->filename));
+    av_strlcpy(audio->filename, argv[1], sizeof(audio->filename));/*av_strlcpy는 ffmpeg에서 제공하는 strlcpy함수로써 기능은 서로 거의 같으며
+                                                                  메인의 두번째 매개변수를 "audio"의 filename 인자에 복사한다. */
 
-    audio->thread_id = SDL_CreateThread(decode_thread, audio);
-    if (!audio->thread_id) {
+    audio->thread_id = SDL_CreateThread(decode_thread, audio); //SDL쓰레드를 생성하여 반환값을 "audio"의 thread_id 인자에 대입한다.
+    if (!audio->thread_id) { //만일 "audio"의 thread_id가 0이면 즉, 쓰레드 생성이 비정상적인경우
         av_free(audio);
         return -1;
     }
