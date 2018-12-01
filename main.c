@@ -153,115 +153,169 @@ static void packet_queue_flush(PacketQueue *q)
     SDL_UnlockMutex(q->mutex);
 }
 
-int audio_decode_frame(audio_entry *is)
+int is_same_channel_cnt_in_frame(audio_entry *audio)
 {
-    int len1, len2, decoded_data_size;
-    AVPacket *pkt = &is->packet;
-    int got_frame = 0;
-    int64_t dec_channel_layout;
-    int wanted_nb_samples, resampled_data_size;
+	if (audio->frame->channels == av_get_channel_layout_nb_channels(audio->frame->channel_layout))
+		return TRUE;
+	return FALSE;
+}
 
-    for (;;) {
-        while (is->packet_size > 0) {
-            if (!is->frame) {
-                if (!(is->frame = av_frame_alloc())) {
+int have_channel_layout(audio_entry *audio)
+{
+	if (audio->frame->channel_layout > 0)
+		return true;
+	return false;
+}
+
+int64_t get_decode_channel_layout(audio_entry *audio)
+{
+	if(have_channel_layout(is) && is_same_channel_cnt_in_frame(is))
+		return audio->frame->channel_layout
+	return av_get_default_channel_layout(audio->frame->channels);
+}
+
+int get_size_of_sample_buffer_per_channel(audio_entry *audio)
+{
+	return sizeof(audio->temp_buffer) / audio->target_channels / av_get_bytes_per_sample(audio->target_format);
+}
+
+
+/*
+ * int audio_decode_frame(audio_entry *)
+ *
+ * Decode one audio frame and return its uncompressed size
+ *
+ * The processed audio frame is decoded, counverted if required, and
+ * stored in audio->audio_buf, with size in bytes given by the return value.
+ * 
+ * audio : 오디오 파일 상태 정보를 담고 있는 변수
+ * 
+ */
+int audio_decode_frame(audio_entry *audio)
+{
+	int decoded_frame_len;
+	int nb_sample_cnt_per_channel;
+	int decoded_data_size;
+    AVPacket *packet = &audio->packet;
+    int got_frame = 0;	// 프레임을 얻을수 있는지 없는지 판단 여부
+    int64_t deccoded_channel_layout;	
+	int wanted_nb_samples_per_channel;
+	int resampled_data_size;	// 최종적으로 오디오로 변환된 데이터 크기
+
+   while(TRUE) {
+        while (audio->packet_size > 0) {
+			// 메모리 할당 여부 판단
+            if (!audio->frame) {
+				// 메모리 할당
+                if (!(audio->frame = av_frame_alloc()))
                     return AVERROR(ENOMEM);
-                }
-            } else
-                av_frame_unref(is->frame);
+            } else // audio_frame을 default 값들로 초기화
+                av_frame_unref(audio->frame);
 
-            len1 = avcodec_decode_audio4(is->stream->codec, is->frame, &got_frame,  pkt);
-            if (len1 < 0) {
-                // error, skip the frame
-                is->packet_size = 0;
+			// packet->size 만큼 프레임을 디코딩하여 audio_frame에 저장
+            decoded_frame_len = avcodec_decode_audio4(audio->stream->codec, audio->frame, &got_frame, packet);
+			// 디코드 실패한경우
+            if (decoded_frame_len < 0) {
+                audio->packet_size = 0;
                 break;
             }
+			
+			// 읽은 프레임 길이 만큼 남은 패킷 정보 변경
+            audio->packet_data += decoded_frame_len;
+            audio->packet_size -= decoded_frame_len;
 
-            is->packet_data += len1;
-            is->packet_size -= len1;
-
-            if (!got_frame)
+			// 프레임을 디코드 할 수 없는경우
+            if (!got_frame) 
                 continue;
 
+			// audio_frame에 설정되어있는 값들에 필요한 버퍼 사이즈 얻음
             decoded_data_size = av_samples_get_buffer_size(NULL,
-                                is->frame->channels,
-                                is->frame->nb_samples,
-                                is->frame->format, 1);
+                                audio->frame->channels,
+                                audio->frame->nb_samples,
+                                audio->frame->format, 1);
 
-            dec_channel_layout = (is->frame->channel_layout && is->frame->channels
-                                  == av_get_channel_layout_nb_channels(is->frame->channel_layout))
-                                 ? is->frame->channel_layout
-                                 : av_get_default_channel_layout(is->frame->channels);
+			deccoded_channel_layout = get_decode_channel_layout(audio);
 
-            wanted_nb_samples =  is->frame->nb_samples;
+			// 출력 하고자 하는 정보에 분석한 프레임의 채널당 오디오 샘플 수를 저장
+            wanted_nb_samples = audio->frame->nb_samples;
 
-            //fprintf(stderr, "wanted_nb_samples = %d\n", wanted_nb_samples);
-
-            if (is->frame->format != is->source_format ||
-                dec_channel_layout != is->source_channel_layout ||
-                is->frame->sample_rate != is->source_samplerate ||
-                (wanted_nb_samples != is->frame->nb_samples && !is->swr_ctx)) {
-                if (is->swr_ctx) swr_free(&is->swr_ctx);
-                is->swr_ctx = swr_alloc_set_opts(NULL,
-                                                 is->target_channel_layout,
-                                                 is->target_format,
-                                                 is->target_samplerate,
-                                                 dec_channel_layout,
-                                                 is->frame->format,
-                                                 is->frame->sample_rate,
+			// 디코딩되노 frame과 할당 받았던 자원 정보가 일치하는지 판단
+            if (audio->frame->format != audio->source_format ||
+                deccoded_channel_layout != audio->source_channel_layout ||
+                audio->frame->sample_rate != audio->source_samplerate ||
+                (wanted_nb_samples != audio->frame->nb_samples && !audio->swr_ctx)) {
+				// 메모리 할당 되있다면 해제
+                if (audio->swr_ctx) swr_free(&audio->swr_ctx);
+				// 원하는 정보로 재할당
+                audio->swr_ctx = swr_alloc_set_opts(NULL,
+                                                 audio->target_channel_layout,
+                                                 audio->target_format,
+                                                 audio->target_samplerate,
+                                                 deccoded_channel_layout,
+                                                 audio->frame->format,
+                                                 audio->frame->sample_rate,
                                                  0, NULL);
-                if (!is->swr_ctx || swr_init(is->swr_ctx) < 0) {
+				// 할당된 메모리 초기화 및 확인
+                if (!audio->swr_ctx || swr_init(audio->swr_ctx) < 0) {
                     fprintf(stderr, "swr_init() failed\n");
                     break;
                 }
-                is->source_channel_layout = dec_channel_layout;
-                is->source_channels = is->stream->codec->channels;
-                is->source_samplerate = is->stream->codec->sample_rate;
-                is->source_format = is->stream->codec->sample_fmt;
+				// 오디오 원본 정보를 갱신
+                audio->source_channel_layout = deccoded_channel_layout;
+                audio->source_channels = audio->stream->codec->channels;
+                audio->source_samplerate = audio->stream->codec->sample_rate;
+                audio->source_format = audio->stream->codec->sample_fmt;
             }
-            if (is->swr_ctx) {
-               // const uint8_t *in[] = { is->frame->data[0] };
-                const uint8_t **in = (const uint8_t **)is->frame->extended_data;
-                uint8_t *out[] = { is->temp_buffer };
-				if (wanted_nb_samples != is->frame->nb_samples) {
-					 if (swr_set_compensation(is->swr_ctx, (wanted_nb_samples - is->frame->nb_samples)
-												 * is->target_samplerate / is->frame->sample_rate,
-												 wanted_nb_samples * is->target_samplerate / is->frame->sample_rate) < 0) {
+
+			// swr_ctx가 메모리 할당 되었는지 판단
+            if (audio->swr_ctx) {
+                const uint8_t **in = (const uint8_t **)audio->frame->extended_data;	 // 압축된 오디오 패킷을 가리키기 위해 더블포인터 사용
+                uint8_t *out[] = { audio->temp_buffer }; // 오디오로 변환된 프레임 데이터를 저장할 버퍼를 가리키는 포인터 배열
+				if (wanted_nb_samples != audio->frame->nb_samples) {
+					// swr_ctx에 오디오 정보들을 resampling하여 swr
+					 if (swr_set_compensation(audio->swr_ctx, (wanted_nb_samples - audio->frame->nb_samples)
+												 * audio->target_samplerate / audio->frame->sample_rate,
+												 wanted_nb_samples * audio->target_samplerate / audio->frame->sample_rate) < 0) {
 						 fprintf(stderr, "swr_set_compensation() failed\n");
 						 break;
 					 }
 				 }
 
-                len2 = swr_convert(is->swr_ctx, out,
-                                   sizeof(is->temp_buffer)
-                                   / is->target_channels
-                                   / av_get_bytes_per_sample(is->target_format),
-                                   in, is->frame->nb_samples);
-                if (len2 < 0) {
+				int sample_buffer_size = get_size_of_sample_buffer_per_channel(audio);
+				// 주어진 정보들을 오디오로 변환
+                nb_sample_cnt_per_channel = swr_convert(audio->swr_ctx, out,
+                                   sample_buffer_size, in, audio->frame->nb_samples);
+
+                if (nb_sample_cnt_per_channel < 0) {
                     fprintf(stderr, "swr_convert() failed\n");
                     break;
                 }
-                if (len2 == sizeof(is->temp_buffer) / is->target_channels / av_get_bytes_per_sample(is->target_format)) {
-                    fprintf(stderr, "warning: audio buffer is probably too small\n");
-                    swr_init(is->swr_ctx);
+				// 성공적으로 오디오 변환 판단
+                if (nb_sample_cnt_per_channel == sizeof(audio->temp_buffer) / audio->target_channels / av_get_bytes_per_sample(audio->target_format)) {
+                    fprintf(stderr, "warning: audio buffer audio probably too small\n");
+                    swr_init(audio->swr_ctx);
                 }
-                is->buffer = is->temp_buffer;
-                resampled_data_size = len2 * is->target_channels * av_get_bytes_per_sample(is->target_format);
-            } else {
+
+				// 오디오로 변환된 정보를 callback함수에서 사용할 다른 버퍼에 대입
+                audio->buffer = audio->temp_buffer;
+				// 변환된 오디오 크기 저장
+                resampled_data_size = nb_sample_cnt_per_channel * audio->target_channels * av_get_bytes_per_sample(audio->target_format);
+            } else {	// sr
 				resampled_data_size = decoded_data_size;
-                is->buffer = is->frame->data[0];
+                audio->buffer = audio->frame->data[0];
             }
-            // We have data, return it and come back for more later
+            // 출력된 오디오 데이터 크기를 반환
             return resampled_data_size;
         }
 
-        if (pkt->data) av_free_packet(pkt);
-		memset(pkt, 0, sizeof(*pkt));
-        if (is->state) return -1;
-        if (packet_queue_get(&is->queue, pkt, 1) < 0) return -1;
+		// 프레임 디코딩에 문제가 생겨 초기화
+        if (packet->data) av_free_packet(packet);
+		memset(packet, 0, sizeof(*packet));
+        if (audio->state) return -1;
+        if (packet_queue_get(&audio->queue, packet, 1) < 0) return -1;
 
-        is->packet_data = pkt->data;
-        is->packet_size = pkt->size;
+        audio->packet_data = packet->data;
+        audio->packet_size = packet->size;
     }
 }
 
@@ -321,14 +375,14 @@ void stream_component_open(audio_entry *audio, int stream_index)
     int nb_channels_layout;
     const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
-    if (stream_index < 0 || stream_index >= audio_ctx->nb_streams) {    //오디오 코덱 없을 경우
+    if (stream_index < 0 || stream_index >= audio_ctx->nb_streams)    //오디오 코덱 없을 경우
         return;
-    }
 	
     codec_ctx = audio_ctx->streams[stream_index]->codec;		 //코덱 정보 저장
 	wanted_nb_channels = codec_ctx->channels;
 	/* 채널 정보 저장 */
 	nb_channels_layout = av_get_channel_layout_nb_channels(wanted_channel_layout);
+
 	if(!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) {
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			     
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
@@ -336,10 +390,12 @@ void stream_component_open(audio_entry *audio, int stream_index)
 	
 	wanted_spec.channels = nb_channels_layout);
 	wanted_spec.freq = codec_ctx->sample_rate;
+
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
 		fprintf(stderr, "Invalid sample rate or channel count!\n");	
 		return;
 	}
+
 	/* 오디오 정보를 담는 구조체 설정 */
 	wanted_spec.format = AUDIO_S16SYS;		
 	wanted_spec.silence = 0;			
@@ -365,6 +421,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
 		fprintf(stderr, "SDL advised audio format %d is not supported!\n", spec.format);
 		return;
 	}
+
 	if (spec.channels != wanted_spec.channels) { //출력하고자 하는 채널과 실제 매개 변수의 채널이 다를 경우
 		wanted_channel_layout = av_get_default_channel_layout(spec.channels);
 		if (!wanted_channel_layout) {
@@ -400,6 +457,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
         fprintf(stderr, "Unsupported codec!\n");
         return;
     }
+    
 	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
     switch(codec_ctx->codec_type) {
     case AVMEDIA_TYPE_AUDIO:					//패킷 생성을 위한 각종 초기화
