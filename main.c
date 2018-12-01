@@ -373,14 +373,14 @@ void stream_component_open(audio_entry *audio, int stream_index)
     int nb_channels_layout;
     const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
-    if ((stream_index < 0) || (stream_index >= audio_ctx->nb_streams))   //오디오 코덱 없을 경우
-        return;
+    if (stream_index < 0 || stream_index >= audio_ctx->nb_streams)
+        return; //오디오 코덱 없을 경우
 	
 	wanted_nb_channels = audio->codec_ctx->channels;
 	/* 채널 정보 저장 */
 	nb_channels_layout = av_get_channel_layout_nb_channels(wanted_channel_layout);
 
-	if(!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) {
+	if (!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) {
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			     
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
@@ -494,7 +494,7 @@ static int decode_thread(void *st_audio_entry)
     audio_entry *audio = (audio_entry *)st_audio_entry;
     AVFormatContext *audio_ctx = NULL;
     AVCodec *codec = NULL;
-    AVPacket *packet;
+    AVPacket *packet = NULL;
     int i, next_frame_index, audio_index = -1;
 
     audio->stream_index = -1;
@@ -532,15 +532,15 @@ static int decode_thread(void *st_audio_entry)
     codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id);
     
     if (!codec) {
-		fprintf(stderr, "Failed to find decoder for stream #%u\n", stream_index);
-        return;
+		fprintf(stderr, "Failed to find decoder for stream #%u\n", audio->stream_index);
+        return -1;
     }
     
     audio->codec_ctx = avcodec_alloc_context3(codec);
     
     if (!audio->codec_ctx) {
-		fprintf(stderr, "Failed to allocate the decoder context for stream #%u\n", stream_index);
-        return;
+		fprintf(stderr, "Failed to allocate the decoder context for stream #%u\n", audio->stream_index);
+        return -1;
     }
 
     // main decode loop
