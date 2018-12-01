@@ -31,7 +31,8 @@ typedef struct PacketQueue
 typedef struct audio_entry
 {
     char            filename[1024];
-    AVFormatContext *context;
+    AVFormatContext *format_ctx;
+    AVCodecContext  *codec_ctx;
     int             stream_index;
     AVStream        *stream;
     AVFrame         *frame;
@@ -143,7 +144,7 @@ static void packet_queue_flush(PacketQueue *q)
     SDL_LockMutex(q->mutex);
     for (pkt = q->first_pkt; pkt != NULL; pkt = pkt1) {
         pkt1 = pkt->next;
-        av_free_packet(&pkt->pkt);
+        av_packet_unref(&pkt->pkt);
         av_freep(&pkt);
     }
     q->last_pkt = NULL;
@@ -163,14 +164,14 @@ int is_same_channel_cnt_in_frame(audio_entry *audio)
 int have_channel_layout(audio_entry *audio)
 {
 	if (audio->frame->channel_layout > 0)
-		return true;
-	return false;
+		return TRUE;
+	return FALSE;
 }
 
 int64_t get_decode_channel_layout(audio_entry *audio)
 {
-	if(have_channel_layout(is) && is_same_channel_cnt_in_frame(is))
-		return audio->frame->channel_layout
+	if(have_channel_layout(audio) && is_same_channel_cnt_in_frame(audio))
+		return audio->frame->channel_layout;
 	return av_get_default_channel_layout(audio->frame->channels);
 }
 
@@ -213,7 +214,7 @@ int audio_decode_frame(audio_entry *audio)
                 av_frame_unref(audio->frame);
 
 			// packet->size 만큼 프레임을 디코딩하여 audio_frame에 저장
-            decoded_frame_len = avcodec_decode_audio4(audio->stream->codec, audio->frame, &got_frame, packet);
+            decoded_frame_len = avcodec_decode_audio4(audio->codec_ctx, audio->frame, &got_frame, packet);
 			// 디코드 실패한경우
             if (decoded_frame_len < 0) {
                 audio->packet_size = 0;
@@ -237,13 +238,13 @@ int audio_decode_frame(audio_entry *audio)
 			deccoded_channel_layout = get_decode_channel_layout(audio);
 
 			// 출력 하고자 하는 정보에 분석한 프레임의 채널당 오디오 샘플 수를 저장
-            wanted_nb_samples = audio->frame->nb_samples;
+            wanted_nb_samples_per_channel = audio->frame->nb_samples;
 
 			// 디코딩되노 frame과 할당 받았던 자원 정보가 일치하는지 판단
             if (audio->frame->format != audio->source_format ||
                 deccoded_channel_layout != audio->source_channel_layout ||
                 audio->frame->sample_rate != audio->source_samplerate ||
-                (wanted_nb_samples != audio->frame->nb_samples && !audio->swr_ctx)) {
+                (wanted_nb_samples_per_channel != audio->frame->nb_samples && !audio->swr_ctx)) {
 				// 메모리 할당 되있다면 해제
                 if (audio->swr_ctx) swr_free(&audio->swr_ctx);
 				// 원하는 정보로 재할당
@@ -262,20 +263,20 @@ int audio_decode_frame(audio_entry *audio)
                 }
 				// 오디오 원본 정보를 갱신
                 audio->source_channel_layout = deccoded_channel_layout;
-                audio->source_channels = audio->stream->codec->channels;
-                audio->source_samplerate = audio->stream->codec->sample_rate;
-                audio->source_format = audio->stream->codec->sample_fmt;
+                audio->source_channels = audio->codec_ctx->channels;
+                audio->source_samplerate = audio->codec_ctx->sample_rate;
+                audio->source_format = audio->codec_ctx->sample_fmt;
             }
 
 			// swr_ctx가 메모리 할당 되었는지 판단
             if (audio->swr_ctx) {
                 const uint8_t **in = (const uint8_t **)audio->frame->extended_data;	 // 압축된 오디오 패킷을 가리키기 위해 더블포인터 사용
                 uint8_t *out[] = { audio->temp_buffer }; // 오디오로 변환된 프레임 데이터를 저장할 버퍼를 가리키는 포인터 배열
-				if (wanted_nb_samples != audio->frame->nb_samples) {
+				if (wanted_nb_samples_per_channel != audio->frame->nb_samples) {
 					// swr_ctx에 오디오 정보들을 resampling하여 swr
-					 if (swr_set_compensation(audio->swr_ctx, (wanted_nb_samples - audio->frame->nb_samples)
+					 if (swr_set_compensation(audio->swr_ctx, (wanted_nb_samples_per_channel - audio->frame->nb_samples)
 												 * audio->target_samplerate / audio->frame->sample_rate,
-												 wanted_nb_samples * audio->target_samplerate / audio->frame->sample_rate) < 0) {
+												 wanted_nb_samples_per_channel * audio->target_samplerate / audio->frame->sample_rate) < 0) {
 						 fprintf(stderr, "swr_set_compensation() failed\n");
 						 break;
 					 }
@@ -309,7 +310,7 @@ int audio_decode_frame(audio_entry *audio)
         }
 
 		// 프레임 디코딩에 문제가 생겨 초기화
-        if (packet->data) av_free_packet(packet);
+        if (packet->data) av_packet_unref(packet);
 		memset(packet, 0, sizeof(*packet));
         if (audio->state) return -1;
         if (packet_queue_get(&audio->queue, packet, 1) < 0) return -1;
@@ -328,7 +329,7 @@ int audio_decode_frame(audio_entry *audio)
 void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
     audio_entry *audio = (audio_entry *)st_audio_entry;
-    int transport_buffer_length
+    int transport_buffer_length;
     int audio_data_size;
 
     while (stream_buffer_length > 0) {
@@ -365,11 +366,8 @@ void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_b
  */
 void stream_component_open(audio_entry *audio, int stream_index)
 {
-    AVFormatContext *audio_ctx = audio->context;
-    AVCodecContext *codec_ctx;					 
-    AVCodec *codec;
-    SDL_AudioSpec wanted_spec;					 
-    SDL_AUdioSpec spec;						 
+    AVFormatContext *audio_ctx = audio->format_ctx;
+    SDL_AudioSpec spec, wanted_spec;		 
     int64_t wanted_channel_layout = 0;				 
     int wanted_nb_channels;
     int nb_channels_layout;
@@ -378,8 +376,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
     if (stream_index < 0 || stream_index >= audio_ctx->nb_streams)    //오디오 코덱 없을 경우
         return;
 	
-    codec_ctx = audio_ctx->streams[stream_index]->codec;		 //코덱 정보 저장
-	wanted_nb_channels = codec_ctx->channels;
+	wanted_nb_channels = audio->codec_ctx->channels;
 	/* 채널 정보 저장 */
 	nb_channels_layout = av_get_channel_layout_nb_channels(wanted_channel_layout);
 
@@ -388,8 +385,8 @@ void stream_component_open(audio_entry *audio, int stream_index)
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
 	
-	wanted_spec.channels = nb_channels_layout);
-	wanted_spec.freq = codec_ctx->sample_rate;
+	wanted_spec.channels = nb_channels_layout;
+	wanted_spec.freq = audio->codec_ctx->sample_rate;
 
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
 		fprintf(stderr, "Invalid sample rate or channel count!\n");	
@@ -448,18 +445,18 @@ void stream_component_open(audio_entry *audio, int stream_index)
 	audio->source_channel_layout = audio->target_channel_layout = wanted_channel_layout;
 	audio->source_channels = audio->target_channels = spec.channels;
     
-    codec = avcodec_find_decoder(codec_ctx->codec_id);	//avcodec_find_decoder(enum AVCodecID id) : 일치하는 코덱 id가 있는 등록 된 디코더를 찾는다 
+    //codec = avcodec_find_decoder(codec_ctx->codec_id); // avcodec_find_decoder(enum AVCodecID id) : 일치하는 코덱 id가 있는 등록 된 디코더를 찾는다 
     /* 
        avcodec_open2(AVCodecContext구조체, 방금찾은 AVCodec구조체, Decoder초기화에 필요한 추가옵션) 
        : 만일 디코더 정보가 존재한다면, AVCodecContext에 해당 정보를 넘겨줘서 디코더로 초기화 
     */
-    if (!codec || (avcodec_open2(codec_ctx, codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
+    if (!audio->codec_ctx->codec || (avcodec_open2(codec_ctx, codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
         fprintf(stderr, "Unsupported codec!\n");
         return;
     }
-    
+
 	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
-    switch(codec_ctx->codec_type) {
+    switch(audio->codec_ctx->codec_type) {
     case AVMEDIA_TYPE_AUDIO:					//패킷 생성을 위한 각종 초기화
         audio->stream_index = stream_index;
         audio->stream = audio_ctx->streams[stream_index];
@@ -496,6 +493,7 @@ static int decode_thread(void *st_audio_entry)
 {
     audio_entry *audio = (audio_entry *)st_audio_entry;
     AVFormatContext *audio_ctx = NULL;
+    AVCodec *codec = NULL;
     AVPacket *packet;
     int i, next_frame_index, audio_index = -1;
 
@@ -507,7 +505,7 @@ static int decode_thread(void *st_audio_entry)
         return -1;
     } // 해당 오디오 파일을 오픈하고, 전달한 AVFormatContext 구조체 주소에 헤더 정보 저장
 
-    audio->context = audio_ctx;
+    audio->format_ctx = audio_ctx;
 
     if (avformat_find_stream_info(audio_ctx, NULL) < 0) {
         return -1;
@@ -515,8 +513,8 @@ static int decode_thread(void *st_audio_entry)
 
     av_dump_format(audio_ctx, 0, audio->filename, 0); // 디버깅을 위해 파일의 헤더 정보를 표준 에러로 덤프
 
-    for (i=0; i<audio_ctx->nb_streams; i++) {
-        if (audio_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO && audio_index < 0) {
+    for (i = 0; i < audio_ctx->nb_streams; i++) {
+        if (audio_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audio_index < 0) {
             audio_index = i;
             break;
         }
@@ -531,33 +529,47 @@ static int decode_thread(void *st_audio_entry)
         goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
     }
 
+    codec = avcodec_find_decoder(audio_ctx->streams[stream_index]->codecpar->codec_id);
+    
+    if (!codec) {
+		fprintf(stderr, "Failed to find decoder for stream #%u\n", stream_index);
+        return;
+    }
+    
+    audio->codec_ctx = avcodec_alloc_context3(codec);
+    
+    if (!audio->codec_ctx) {
+		fprintf(stderr, "Failed to allocate the decoder context for stream #%u\n", stream_index);
+        return;
+    }
+
     // main decode loop
     while(TRUE) {
-        if(audio->state) break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
+        if(audio->state)
+            break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
 
         if (audio->queue.size > AVCODEC_MAX_AUDIO_FRAME_SIZE) {
             SDL_Delay(10);
             continue;
         } // 오디오 패킷 큐의 오버플로우 검사
 
-        next_frame_index = av_read_frame(audio->context, packet); // 프레임의 저장된 내용을 packet에 저장하고, 다음 프레임 인덱스 번호 리턴
+        next_frame_index = av_read_frame(audio->format_ctx, packet); // 프레임의 저장된 내용을 packet에 저장하고, 다음 프레임 인덱스 번호 리턴
 
         if (next_frame_index < 0) {
             // TODO: if & continue 문 간략하게 만들 것
-            if(next_frame_index == AVERROR_EOF || url_feof(audio->context->pb)) {
+            if(next_frame_index == AVERROR_EOF || avio_feof(audio->format_ctx->pb)) {
                 break;
             }
-            if(audio->context->pb && audio->context->pb->error) {
+            if(audio->format_ctx->pb && audio->format_ctx->pb->error) {
                 break;
             }
             continue;
         } // 실패 요인에 파일의 끝 혹은 타 에러 발생 여부 검사
 
-        if (packet->stream_index == audio->stream_index) {
+        if (packet->stream_index == audio->stream_index)
             packet_queue_put(&audio->queue, packet);
-        } else {
-            av_free_packet(packet);
-        } // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
+        else
+            av_packet_unref(packet); // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
     while (!audio->state) {
