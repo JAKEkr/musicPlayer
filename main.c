@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <math.h>
 
-#define SDL_AUDIO_BUFFER_SIZE 1024 
+#define SDL_AUDIO_BUFFER_SIZE 1024
 #define MAX_AUDIOQ_SIZE (1 * 1024 * 1024)
 #define FF_ALLOC_EVENT   (SDL_USEREVENT)
 #define FF_REFRESH_EVENT (SDL_USEREVENT + 1)
@@ -170,7 +170,7 @@ int audio_decode_frame(audio_entry *is)
                 if (!(is->frame = av_frame_alloc())) {
                     return AVERROR(ENOMEM);
                 }
-            } else 
+            } else
                 av_frame_unref(is->frame);
 
             len1 = avcodec_decode_audio4(is->stream->codec, is->frame, &got_frame,  pkt);
@@ -183,7 +183,7 @@ int audio_decode_frame(audio_entry *is)
             is->packet_data += len1;
             is->packet_size -= len1;
 
-            if (!got_frame) 
+            if (!got_frame)
                 continue;
 
             decoded_data_size = av_samples_get_buffer_size(NULL,
@@ -224,7 +224,7 @@ int audio_decode_frame(audio_entry *is)
             }
             if (is->swr_ctx) {
                // const uint8_t *in[] = { is->frame->data[0] };
-                const uint8_t **in = (const uint8_t **)is->frame->extended_data; 
+                const uint8_t **in = (const uint8_t **)is->frame->extended_data;
                 uint8_t *out[] = { is->temp_buffer };
 				if (wanted_nb_samples != is->frame->nb_samples) {
 					 if (swr_set_compensation(is->swr_ctx, (wanted_nb_samples - is->frame->nb_samples)
@@ -267,41 +267,41 @@ int audio_decode_frame(audio_entry *is)
         is->packet_size = pkt->size;
     }
 }
-void audio_callback(void *userdata, Uint8 *stream, int len)
+void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
 	/*
 	다른 함수로 부터 데이터를 끌어오는 간단한 루프로써
 	이 함수는 오디오 디바이스에 출력할 데이터가 필요하면
-	SDL_thread에서 콜백함수가 호출되고 stream에 필요한 만큼의 데이터를
+	SDL_thread에서 콜백함수가 호출되고 audio_data_stream에 필요한 만큼의 데이터를
 	디코딩하여 전달하기 위해 사용된다.
 	*/
-    audio_entry *is = (audio_entry *)userdata; //audio_entry 구조체 포인터 "is"에 stream을 통해 넘어온 void 포인터 userdata가 가리키는 audio 포인터 구조체 할당
-    int len1, audio_data_size; //넘길 버퍼의 길이 "len1", 디코딩 된 프레임 크기가 저장될 "audio_data_size" 변수 선언
+    audio_entry *audio = (audio_entry *)st_audio_entry; //audio_entry 구조체 포인터 "audio"에 audio_data_stream을 통해 넘어온 void 포인터 st_audio_entry가 가리키는 audio 포인터 구조체 할당
+    int transport_buffer_length, audio_data_size; //넘길 버퍼의 길이 "transport_buffer_length", 디코딩 된 프레임 크기가 저장될 "audio_data_size" 변수 선언
 
-    while (len > 0) { //stream을 통해 전송되온 버퍼 내 바이트의 길이 "len"이 0보다 크면 루프
-        if (is->buffer_index >= is->buffer_size) { //인덱스가 사이즈보다 크면
-            audio_data_size = audio_decode_frame(is); // "is"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
+    while (stream_buffer_length > 0) { //audio_data_stream을 통해 전송되온 버퍼 내 바이트의 길이 "stream_buffer_length"이 0보다 크면 루프
+        if (audio->buffer_index >= audio->buffer_size) { //인덱스가 사이즈보다 크면
+            audio_data_size = audio_decode_frame(audio); // "audio"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
 
             if(audio_data_size < 0) {//만약 데이터 사이즈가 0보다 작으면
                 /* silence */
-                is->buffer_size = 1024; // "is"의 buffer_size 인자를 1024로 설정
-                memset(is->buffer, 0, is->buffer_size); //"is"의 buffer인자의 시작주소부터 "is"의 buffer_size인자만큼 0으로 초기화한다.
+                audio->buffer_size = 1024; // "audio"의 buffer_size 인자를 1024로 설정
+                memset(audio->buffer, 0, audio->buffer_size); //"audio"의 buffer인자의 시작주소부터 "audio"의 buffer_size인자만큼 0으로 초기화한다.
             } else {
-                is->buffer_size = audio_data_size; //"is"의 buffer_size인자에 audio_data_size를 대입한다.
+                audio->buffer_size = audio_data_size; //"audio"의 buffer_size인자에 audio_data_size를 대입한다.
             }
-            is->buffer_index = 0; //"is"의 buffer_size인자에 audio_data_size를 대입한다.
+            audio->buffer_index = 0; //"audio"의 buffer_size인자에 audio_data_size를 대입한다.
         }
 
-        len1 = is->buffer_size - is->buffer_index; //넘겨줄 버퍼의 길이 "len1"에 "is"의 buffer_size 인자 = buffer_index인자를 대입한다.
-        if (len1 > len) { //넘겨줄 버퍼의 길이 "len1"이 stream의 전송량의 길이 "len"보다 큰 경우
-            len1 = len; //넘겨줄 버퍼의 길이 len1을 stream의 전송량의 길이 len만큼으로 고정한다.
+        transport_buffer_length = audio->buffer_size - audio->buffer_index; //넘겨줄 버퍼의 길이 "transport_buffer_length"에 "audio"의 buffer_size 인자 = buffer_index인자를 대입한다.
+        if (transport_buffer_length > stream_buffer_length) { //넘겨줄 버퍼의 길이 "transport_buffer_length"이 audio_data_stream의 전송량의 길이 "stream_buffer_length"보다 큰 경우
+            transport_buffer_length = stream_buffer_length; //넘겨줄 버퍼의 길이 transport_buffer_length을 audio_data_stream의 전송량의 길이 stream_buffer_length만큼으로 고정한다.
         }
 
-        memcpy(stream, (uint8_t *)is->buffer + is->buffer_index, len1); /* stream에 "is"의 buffer_index+버퍼 위치부터 len1만큼의 길이만큼 버퍼를 복사
-									즉, stream에 "is"에 저장된 버퍼의 내용을 len1만큼 전송*/
-        len -= len1; //다음에 전송할 길이 "len"을 이번에 전송한 길이 "len1"만큼 빼준다.
-        stream += len1; //stream의 포인터를 이번에 전송한 길이 len1만큼 증가
-        is->buffer_index += len1; //"is"의 buffer_index 인자를 이번에 전송한 길이 len1만큼 증가
+        memcpy(audio_data_stream, (uint8_t *)audio->buffer + audio->buffer_index, transport_buffer_length); /* audio_data_stream에 "audio"의 buffer_index+버퍼 위치부터 transport_buffer_length만큼의 길이만큼 버퍼를 복사
+									즉, audio_data_stream에 "audio"에 저장된 버퍼의 내용을 transport_buffer_length만큼 전송*/
+        stream_buffer_length -= transport_buffer_length; //다음에 전송할 길이 "stream_buffer_length"을 이번에 전송한 길이 "transport_buffer_length"만큼 빼준다.
+        audio_data_stream += transport_buffer_length; //audio_data_stream의 포인터를 이번에 전송한 길이 transport_buffer_length만큼 증가
+        audio->buffer_index += transport_buffer_length; //"audio"의 buffer_index 인자를 이번에 전송한 길이 transport_buffer_length만큼 증가
     }
 }
 
@@ -318,14 +318,14 @@ int stream_component_open(audio_entry *is, int stream_index)
     if (stream_index < 0 || stream_index >= ic->nb_streams) {
         return -1;
     }
-	
+
     codecCtx = ic->streams[stream_index]->codec;
 	wanted_nb_channels = codecCtx->channels;
 	if(!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) {
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
-	
+
 	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
 	wanted_spec.freq = codecCtx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {
@@ -337,7 +337,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;
 	wanted_spec.callback = audio_callback;
 	wanted_spec.userdata = is;
-	
+
 	while(SDL_OpenAudio(&wanted_spec, &spec) < 0) {
 		fprintf(stderr, "SDL_OpenAudio (%d channels): %s\n", wanted_spec.channels, SDL_GetError());
 		wanted_spec.channels = next_nb_channels[FFMIN(7, wanted_spec.channels)];
@@ -374,7 +374,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	is->source_samplerate = is->target_samplerate = spec.freq;
 	is->source_channel_layout = is->target_channel_layout = wanted_channel_layout;
 	is->source_channels = is->target_channels = spec.channels;
-    
+
     codec = avcodec_find_decoder(codecCtx->codec_id);
     if (!codec || (avcodec_open2(codecCtx, codec, NULL) < 0)) {
         fprintf(stderr, "Unsupported codec!\n");
