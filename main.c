@@ -11,13 +11,10 @@
 #include <math.h>
 
 #define SDL_AUDIO_BUFFER_SIZE 1024
-#define MAX_AUDIOQ_SIZE (1 * 1024 * 1024)
-#define FF_ALLOC_EVENT   (SDL_USEREVENT)
-#define FF_REFRESH_EVENT (SDL_USEREVENT + 1)
-#define FF_QUIT_EVENT (SDL_USEREVENT + 2)
+#define AVCODEC_MAX_AUDIO_FRAME_SIZE 192000
 
-// FFMPEG 라이브러리 버전업으로 해당 매크로가 사라진 관계로 임의로 정의해놓음
-#define AVCODEC_MAX_AUDIO_FRAME_SIZE 1024 * 1024 * 4
+#define ERROR_EVENT SDL_USEREVENT
+#define QUIT_EVENT (SDL_USEREVENT + 1)
 
 #define TRUE 1
 #define FALSE 0
@@ -267,42 +264,44 @@ int audio_decode_frame(audio_entry *is)
         is->packet_size = pkt->size;
     }
 }
+
+/*
+ * void audio_callback(void *, Uint8 *, int)
+ *
+ * 다른 함수로 부터 데이터를 끌어오는 간단한 루프로써 오디오 디바이스에 출력할 데이터가 필요하면
+ * SDL_thread에서 콜백함수가 호출되고 audio_data_stream에 필요한 만큼의 데이터를 디코딩하여 전달하기 위해 사용하는 함수.
+ *
+ */
 void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
-	/*
-	다른 함수로 부터 데이터를 끌어오는 간단한 루프로써
-	이 함수는 오디오 디바이스에 출력할 데이터가 필요하면
-	SDL_thread에서 콜백함수가 호출되고 audio_data_stream에 필요한 만큼의 데이터를
-	디코딩하여 전달하기 위해 사용된다.
-	*/
-    audio_entry *audio = (audio_entry *)st_audio_entry; //audio_entry 구조체 포인터 "audio"에 audio_data_stream을 통해 넘어온 void 포인터 st_audio_entry가 가리키는 audio 포인터 구조체 할당
-    int transport_buffer_length, audio_data_size; //넘길 버퍼의 길이 "transport_buffer_length", 디코딩 된 프레임 크기가 저장될 "audio_data_size" 변수 선언
+    audio_entry *audio = (audio_entry *)st_audio_entry;
+    int transport_buffer_length, audio_data_size;
 
     while (stream_buffer_length > 0) {
         if (audio->buffer_index >= audio->buffer_size) {
-            audio_data_size = audio_decode_frame(audio); // "audio"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
+            audio_data_size = audio_decode_frame(audio);
 
             if(audio_data_size < 0) {
                 /* silence */
                 audio->buffer_size = 1024;
-                memset(audio->buffer, 0, audio->buffer_size); //"audio"의 buffer인자의 시작주소부터 "audio"의 buffer_size인자만큼 0으로 초기화한다.
+                memset(audio->buffer, 0, audio->buffer_size);
             } else {
                 audio->buffer_size = audio_data_size;
             }
             audio->buffer_index = 0;
         }
 
-        transport_buffer_length = audio->buffer_size - audio->buffer_index; //넘겨줄 버퍼의 길이 "transport_buffer_length"에 "audio"의 buffer_size 인자 = buffer_index인자를 대입한다.
-        if (transport_buffer_length > stream_buffer_length) { //넘겨줄 버퍼의 길이 "transport_buffer_length"이 audio_data_stream의 전송량의 길이 "stream_buffer_length"보다 큰 경우
-            transport_buffer_length = stream_buffer_length; //넘겨줄 버퍼의 길이 transport_buffer_length을 audio_data_stream의 전송량의 길이 stream_buffer_length만큼으로 고정한다.
+        transport_buffer_length = audio->buffer_size - audio->buffer_index; // 넘겨줄 버퍼의 길이 "transport_buffer_length"에 "audio"의 buffer_size 인자 = buffer_index인자를 대입
+        if (transport_buffer_length > stream_buffer_length) {
+            transport_buffer_length = stream_buffer_length;
         }
 
         memcpy(audio_data_stream, (uint8_t *)audio->buffer + audio->buffer_index, transport_buffer_length); /* audio_data_stream에 "audio"의 buffer_index+버퍼 위치부터 transport_buffer_length만큼의 길이만큼 버퍼를 복사
 									즉, audio_data_stream에 "audio"에 저장된 버퍼의 내용을 transport_buffer_length만큼 전송*/
-        stream_buffer_length -= transport_buffer_length; //다음에 전송할 길이 "stream_buffer_length"을 이번에 전송한 길이 "transport_buffer_length"만큼 빼준다.
-        audio_data_stream += transport_buffer_length; //audio_data_stream의 포인터를 이번에 전송한 길이 transport_buffer_length만큼 증가
-        audio->buffer_index += transport_buffer_length; //"audio"의 buffer_index 인자를 이번에 전송한 길이 transport_buffer_length만큼 증가
-    }
+        stream_buffer_length -= transport_buffer_length;
+        audio_data_stream += transport_buffer_length;
+        audio->buffer_index += transport_buffer_length;
+    } // 루프를 돌며 stream을 필요한 데이터 길이에 맞게 분할한 후 해당 데이터를 디코딩해서 호출한 쓰레드로 전달
 }
 
 int stream_component_open(audio_entry *is, int stream_index)
@@ -405,73 +404,93 @@ static void stream_component_close(VideoState *is, int stream_index) {
 
 }
 */
-static int decode_thread(void *arg)
-{
-    audio_entry *is = (audio_entry *)arg;
-    AVFormatContext *ic = NULL;
-    AVPacket pkt1, *packet = &pkt1;
-    int ret, i, audio_index = -1;
 
-    is->stream_index=-1;
+/*
+ * static int decode_thread(void *);
+ * 
+ * 전달 받은 파일을 오픈하고 헤더 정보를 가져온 뒤, 오디오 코덱이 있는 스트림을 찾아 오디오를
+ * 재생시키는 별도의 쓰레드를 동작시킨 후, 해당 스트림과 일치하는 패킷을 찾아 오디오 큐에 입력하는 함수.
+ * 
+ * 리턴값: 정상적인 종료시 0, 에러 혹은 충돌에 의한 비정상적인 종료시 -1
+ */
+static int decode_thread(void *st_audio_entry)
+{
+    audio_entry *audio = (audio_entry *)st_audio_entry;
+    AVFormatContext *audio_ctx = NULL;
+    AVPacket *packet;
+    int i, next_frame_index, audio_index = -1;
+
+    audio->stream_index = -1;
 
     //global_video_state = is;
 
-    if (avformat_open_input(&ic, is->filename, NULL, NULL) != 0) {
+    if (avformat_open_input(&audio_ctx, audio->filename, NULL, NULL) != 0) {
         return -1;
-    }
-    is->context = ic;
-    if (avformat_find_stream_info(ic, NULL) < 0) {
+    } // 해당 오디오 파일을 오픈하고, 전달한 AVFormatContext 구조체 주소에 헤더 정보 저장
+
+    audio->context = audio_ctx;
+
+    if (avformat_find_stream_info(audio_ctx, NULL) < 0) {
         return -1;
-    }
-    av_dump_format(ic, 0, is->filename, 0);
-    for (i=0; i<ic->nb_streams; i++) {
-        if (ic->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO && audio_index < 0) {
-            audio_index=i;
+    } // 오디오 헤더로부터 스트림 정보 검색
+
+    av_dump_format(audio_ctx, 0, audio->filename, 0); // 디버깅을 위해 파일의 헤더 정보를 표준 에러로 덤프
+
+    for (i=0; i<audio_ctx->nb_streams; i++) {
+        if (audio_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO && audio_index < 0) {
+            audio_index = i;
             break;
         }
-    }
+    } // 오디오 코덱이 존재하는 스트림 인덱스 번호 탐색
+
     if (audio_index >= 0) {
-        stream_component_open(is, audio_index);
+        stream_component_open(audio, audio_index);
+    } // 추가 설정 후, 별도의 쓰레드로 오디오 재생
+
+    if (audio->stream_index < 0) {
+        fprintf(stderr, "%s: could not open codecs\n", audio->filename);
+        goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
     }
-    if (is->stream_index < 0) {
-        fprintf(stderr, "%s: could not open codecs\n", is->filename);
-        goto fail;
-    }
+
     // main decode loop
-    for(;;) {
-        if(is->state) break;
-        if (is->queue.size > MAX_AUDIOQ_SIZE) {
+    while(TRUE) {
+        if(audio->state) break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
+
+        if (audio->queue.size > AVCODEC_MAX_AUDIO_FRAME_SIZE) {
             SDL_Delay(10);
             continue;
-        }
-        ret = av_read_frame(is->context, packet);
-        if (ret < 0) {
-            if(ret == AVERROR_EOF || url_feof(is->context->pb)) {
+        } // 오디오 패킷 큐의 오버플로우 검사
+
+        next_frame_index = av_read_frame(audio->context, packet); // 프레임의 저장된 내용을 packet에 저장하고, 다음 프레임 인덱스 번호 리턴
+
+        if (next_frame_index < 0) {
+            // TODO: if & continue 문 간략하게 만들 것
+            if(next_frame_index == AVERROR_EOF || url_feof(audio->context->pb)) {
                 break;
             }
-            if(is->context->pb && is->context->pb->error) {
+            if(audio->context->pb && audio->context->pb->error) {
                 break;
             }
             continue;
-        }
+        } // 실패 요인에 파일의 끝 혹은 타 에러 발생 여부 검사
 
-        if (packet->stream_index == is->stream_index) {
-            packet_queue_put(&is->queue, packet);
+        if (packet->stream_index == audio->stream_index) {
+            packet_queue_put(&audio->queue, packet);
         } else {
             av_free_packet(packet);
-        }
+        } // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
-    while (!is->state) {
+    while (!audio->state) {
         SDL_Delay(100);
-    }
+    } // 다른 쓰레드와 종료 시점 동기화
 
 fail: {
         SDL_Event event;
-        event.type = FF_QUIT_EVENT;
-        event.user.data1 = is;
+        event.type = QUIT_EVENT;
+        event.user.data1 = audio;
         SDL_PushEvent(&event);
-    }
+    } // 오디오 스트림 탐색 실패시 메인 쓰레드로 종료 이벤트 전달
 
     return 0;
 }
@@ -507,7 +526,7 @@ int main(int argc, char **argv)
     {
         SDL_WaitEvent(&event);
         switch(event.type) {
-        case FF_QUIT_EVENT:
+        case QUIT_EVENT:
         case SDL_QUIT:
             audio->state = 1;
             SDL_Quit();
