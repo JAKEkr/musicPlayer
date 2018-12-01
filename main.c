@@ -299,15 +299,18 @@ void audio_callback(void *userdata, Uint8 *stream, int len)
     }
 }
 
-/* 사운드 매개 변수 및 사운드 파일 설정 */
+/* 
+ * void_stream_component_open(audio_entry *audio, int stream_index)
+ * audio_entry구조체와 stream index를 매개변수로 받아 사운드 매개 변수 및 사운드 파일을 설정하는 함수
+*/
 void stream_component_open(audio_entry *audio, int stream_index)
 {
     AVFormatContext *audio_ctx = audio->context;
-    AVCodecContext *codec_ctx;					 //stream을 디코딩 할 때 필요한 정보
+    AVCodecContext *codec_ctx;					 
     AVCodec *codec;
-    SDL_AudioSpec wanted_spec;					 //오디오의 원하는 출력 형식을 나타내는 구조체
-    SDL_AUdioSpec spec;						 //실제 매개 변수로 채워지는 구조체
-    int64_t wanted_channel_layout = 0;				 //64비트(8바이트) 크기의 부호 있는 정수형 채널 레이아웃
+    SDL_AudioSpec wanted_spec;					 
+    SDL_AUdioSpec spec;						 
+    int64_t wanted_channel_layout = 0;				 
     int wanted_nb_channels;
     int nb_channels_layout;
     const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
@@ -320,23 +323,23 @@ void stream_component_open(audio_entry *audio, int stream_index)
 	wanted_nb_channels = codec_ctx->channels;
 	/* 채널 정보 저장 */
 	nb_channels_layout = av_get_channel_layout_nb_channels(wanted_channel_layout);
-	if(!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) { //av_get_channel_layout_nb_channels(unut64_t channel_layout) : 채널 레이아웃에서 채널 수를 반환
-		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			       //av_get_default_channel_layout (int nb_channels) : 지정된 채널 수에 대한 기본 채널 레이아웃을 반환
+	if(!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) {
+		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			     
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
 	
 	wanted_spec.channels = nb_channels_layout);
 	wanted_spec.freq = codec_ctx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
-		fprintf(stderr, "Invalid sample rate or channel count!\n");	//에러 출력
+		fprintf(stderr, "Invalid sample rate or channel count!\n");	
 		return;
 	}
 	/* 오디오 정보를 담는 구조체 설정 */
-	wanted_spec.format = AUDIO_S16SYS;		//SDL에게 어떤 형식으로 제공할 것인지 알려준다, signed 각 샘플 길이는 16비트
-	wanted_spec.silence = 0;			//오디오가 signed 이기 때문에 0
-	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;	//SDL이 추가 오디오 데이터를 요청할 때를 대비한 오디오 버퍼의 사이즈
+	wanted_spec.format = AUDIO_S16SYS;		
+	wanted_spec.silence = 0;			
+	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;	
 	wanted_spec.callback = audio_callback;		//오디오 버퍼를 채우는 콜백함수
-	wanted_spec.userdata = audio;			//콜백함수에 전달되는 유저 데이터
+	wanted_spec.userdata = audio;			
 	
 	/* 
 	   실패시 출력 
@@ -357,7 +360,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
 		return;
 	}
 	if (spec.channels != wanted_spec.channels) { //출력하고자 하는 채널과 실제 매개 변수의 채널이 다를 경우
-		wanted_channel_layout = av_get_default_channel_layout(spec.channels); //실제 매개 변수의 채널 수에 대한 채널 레이아웃을 출력하고자 하는 채널 레이아웃에 넣는다
+		wanted_channel_layout = av_get_default_channel_layout(spec.channels);
 		if (!wanted_channel_layout) {
 			fprintf(stderr, "SDL advised channel count %d is not supported!\n", spec.channels);
 			return;
@@ -377,10 +380,10 @@ void stream_component_open(audio_entry *audio, int stream_index)
 	fprintf(stderr, "%d: spec.freq = %d\n", __LINE__, spec.freq);
 
 	/* 설정된 매개변수를 구조체에 저장 */
-	audio->source_format = audio->target_format = AV_SAMPLE_FMT_S16;			//샘플 형식
-	audio->source_samplerate = audio->target_samplerate = spec.freq;			//주파수
-	audio->source_channel_layout = audio->target_channel_layout = wanted_channel_layout;	//채널레이아웃
-	audio->source_channels = audio->target_channels = spec.channels;			//채널
+	audio->source_format = audio->target_format = AV_SAMPLE_FMT_S16;
+	audio->source_samplerate = audio->target_samplerate = spec.freq;
+	audio->source_channel_layout = audio->target_channel_layout = wanted_channel_layout;
+	audio->source_channels = audio->target_channels = spec.channels;
     
     codec = avcodec_find_decoder(codec_ctx->codec_id);	//avcodec_find_decoder(enum AVCodecID id) : 일치하는 코덱 id가 있는 등록 된 디코더를 찾는다 
     /* 
