@@ -408,82 +408,82 @@ static void stream_component_close(VideoState *is, int stream_index) {
  * 
  * 리턴값: 정상적인 종료시 0, 에러 혹은 충돌에 의한 비정상적인 종료시 -1
  */
-static int decode_thread(void *arg)
+static int decode_thread(void *st_audio_entry)
 {
-    audio_entry *is = (audio_entry *)arg;
-    AVFormatContext *ic = NULL;
-    AVPacket pkt1, *packet = &pkt1; // TODO: pk1은 사용되지 않는 변수로 지울 것
-    int ret, i, audio_index = -1;
+    audio_entry *audio = (audio_entry *)st_audio_entry;
+    AVFormatContext *audio_ctx = NULL;
+    AVPacket *packet;
+    int i, next_frame_index, audio_index = -1;
 
-    is->stream_index=-1;
+    audio->stream_index = -1;
 
     //global_video_state = is;
 
-    if (avformat_open_input(&ic, is->filename, NULL, NULL) != 0) {
+    if (avformat_open_input(&audio_ctx, audio->filename, NULL, NULL) != 0) {
         return -1;
     } // 해당 오디오 파일을 오픈하고, 전달한 AVFormatContext 구조체 주소에 헤더 정보 저장
 
-    is->context = ic;
+    audio->context = audio_ctx;
 
-    if (avformat_find_stream_info(ic, NULL) < 0) {
+    if (avformat_find_stream_info(audio_ctx, NULL) < 0) {
         return -1;
     } // 오디오 헤더로부터 스트림 정보 검색
 
-    av_dump_format(ic, 0, is->filename, 0); // 디버깅을 위해 파일의 헤더 정보를 표준 에러로 덤프
+    av_dump_format(audio_ctx, 0, audio->filename, 0); // 디버깅을 위해 파일의 헤더 정보를 표준 에러로 덤프
 
-    for (i=0; i<ic->nb_streams; i++) {
-        if (ic->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO && audio_index < 0) {
-            audio_index=i;
+    for (i=0; i<audio_ctx->nb_streams; i++) {
+        if (audio_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO && audio_index < 0) {
+            audio_index = i;
             break;
         }
     } // 오디오 코덱이 존재하는 스트림 인덱스 번호 탐색
 
     if (audio_index >= 0) {
-        stream_component_open(is, audio_index);
+        stream_component_open(audio, audio_index);
     } // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
-    if (is->stream_index < 0) {
-        fprintf(stderr, "%s: could not open codecs\n", is->filename);
+    if (audio->stream_index < 0) {
+        fprintf(stderr, "%s: could not open codecs\n", audio->filename);
         goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
     }
 
     // main decode loop
     for(;;) {
-        if(is->state) break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
+        if(audio->state) break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
 
-        if (is->queue.size > MAX_AUDIOQ_SIZE) {
+        if (audio->queue.size > MAX_AUDIOQ_SIZE) {
             SDL_Delay(10);
             continue;
         } // 오디오 패킷 큐의 오버플로우 검사
 
-        ret = av_read_frame(is->context, packet);
+        next_frame_index = av_read_frame(audio->context, packet); // 프레임의 저장된 내용을 packet에 저장하고, 다음 프레임 인덱스 번호 리턴
 
-        if (ret < 0) {
+        if (next_frame_index < 0) {
             // TODO: if & continue 문 간략하게 만들 것
-            if(ret == AVERROR_EOF || url_feof(is->context->pb)) {
+            if(next_frame_index == AVERROR_EOF || url_feof(audio->context->pb)) {
                 break;
             }
-            if(is->context->pb && is->context->pb->error) {
+            if(audio->context->pb && audio->context->pb->error) {
                 break;
             }
             continue;
         } // 실패 요인에 파일의 끝 혹은 타 에러 발생 여부 검사
 
-        if (packet->stream_index == is->stream_index) {
-            packet_queue_put(&is->queue, packet);
+        if (packet->stream_index == audio->stream_index) {
+            packet_queue_put(&audio->queue, packet);
         } else {
             av_free_packet(packet);
         } // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
-    while (!is->state) {
+    while (!audio->state) {
         SDL_Delay(100);
     } // 다른 쓰레드와 종료 시점 동기화
 
 fail: {
         SDL_Event event;
         event.type = FF_QUIT_EVENT;
-        event.user.data1 = is;
+        event.user.data1 = audio;
         SDL_PushEvent(&event);
     } // 오디오 스트림 탐색 실패시 메인 쓰레드로 종료 이벤트 전달
 
