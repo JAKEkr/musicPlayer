@@ -1,4 +1,4 @@
-#include <libavcodec/avcodec.h>
+﻿#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
@@ -167,7 +167,7 @@ int audio_decode_frame(audio_entry *is)
                 if (!(is->frame = av_frame_alloc())) {
                     return AVERROR(ENOMEM);
                 }
-            } else 
+            } else
                 av_frame_unref(is->frame);
 
             len1 = avcodec_decode_audio4(is->stream->codec, is->frame, &got_frame,  pkt);
@@ -180,7 +180,7 @@ int audio_decode_frame(audio_entry *is)
             is->packet_data += len1;
             is->packet_size -= len1;
 
-            if (!got_frame) 
+            if (!got_frame)
                 continue;
 
             decoded_data_size = av_samples_get_buffer_size(NULL,
@@ -221,7 +221,7 @@ int audio_decode_frame(audio_entry *is)
             }
             if (is->swr_ctx) {
                // const uint8_t *in[] = { is->frame->data[0] };
-                const uint8_t **in = (const uint8_t **)is->frame->extended_data; 
+                const uint8_t **in = (const uint8_t **)is->frame->extended_data;
                 uint8_t *out[] = { is->temp_buffer };
 				if (wanted_nb_samples != is->frame->nb_samples) {
 					 if (swr_set_compensation(is->swr_ctx, (wanted_nb_samples - is->frame->nb_samples)
@@ -265,35 +265,43 @@ int audio_decode_frame(audio_entry *is)
     }
 }
 
-void audio_callback(void *userdata, Uint8 *stream, int len)
+/*
+ * void audio_callback(void *, Uint8 *, int)
+ * 
+ * 다른 함수로 부터 데이터를 끌어오는 간단한 루프로써 오디오 디바이스에 출력할 데이터가 필요하면 SDL_thread에서 콜백함수가 호출되고,
+ *  audio_data_stream에 필요한 만큼의 데이터를 디코딩하여 전달하는 함수.
+ */
+void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
-    audio_entry *is = (audio_entry *)userdata;
-    int len1, audio_data_size;
+    audio_entry *audio = (audio_entry *)st_audio_entry;
+    int transport_buffer_length
+    int audio_data_size;
 
-    while (len > 0) {
-        if (is->buffer_index >= is->buffer_size) {
-            audio_data_size = audio_decode_frame(is);
+    while (stream_buffer_length > 0) {
+        if (audio->buffer_index >= audio->buffer_size) {
+            audio_data_size = audio_decode_frame(audio); // "audio"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
 
             if(audio_data_size < 0) {
-                /* silence */
-                is->buffer_size = 1024;
-                memset(is->buffer, 0, is->buffer_size);
-            } else {
-                is->buffer_size = audio_data_size;
-            }
-            is->buffer_index = 0;
+                audio->buffer_size = 1024;
+                memset(audio->buffer, 0, audio->buffer_size);
+            } else
+                audio->buffer_size = audio_data_size;
+            
+            audio->buffer_index = 0;
         }
 
-        len1 = is->buffer_size - is->buffer_index;
-        if (len1 > len) {
-            len1 = len;
-        }
+        transport_buffer_length = audio->buffer_size - audio->buffer_index;
+        
+        if (transport_buffer_length > stream_buffer_length)
+            transport_buffer_length = stream_buffer_length;
 
-        memcpy(stream, (uint8_t *)is->buffer + is->buffer_index, len1);
-        len -= len1;
-        stream += len1;
-        is->buffer_index += len1;
-    }
+        // audio_data_stream에 "audio"에 저장된 버퍼의 내용을 transport_buffer_length만큼 전송
+        memcpy(audio_data_stream, (uint8_t *)audio->buffer + audio->buffer_index, transport_buffer_length);
+
+        stream_buffer_length -= transport_buffer_length;
+        audio_data_stream += transport_buffer_length;
+        audio->buffer_index += transport_buffer_length;
+    } // 루프를 돌며 stream에서 필요한 데이터 길이만큼 분할한 후, 디코딩하여 호출한 쓰레드로 데이터 전송
 }
 
 int stream_component_open(audio_entry *is, int stream_index)
@@ -309,14 +317,14 @@ int stream_component_open(audio_entry *is, int stream_index)
     if (stream_index < 0 || stream_index >= ic->nb_streams) {
         return -1;
     }
-	
+
     codecCtx = ic->streams[stream_index]->codec;
 	wanted_nb_channels = codecCtx->channels;
 	if(!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) {
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
-	
+
 	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
 	wanted_spec.freq = codecCtx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {
@@ -328,7 +336,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;
 	wanted_spec.callback = audio_callback;
 	wanted_spec.userdata = is;
-	
+
 	while(SDL_OpenAudio(&wanted_spec, &spec) < 0) {
 		fprintf(stderr, "SDL_OpenAudio (%d channels): %s\n", wanted_spec.channels, SDL_GetError());
 		wanted_spec.channels = next_nb_channels[FFMIN(7, wanted_spec.channels)];
@@ -365,7 +373,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	is->source_samplerate = is->target_samplerate = spec.freq;
 	is->source_channel_layout = is->target_channel_layout = wanted_channel_layout;
 	is->source_channels = is->target_channels = spec.channels;
-    
+
     codec = avcodec_find_decoder(codecCtx->codec_id);
     if (!codec || (avcodec_open2(codecCtx, codec, NULL) < 0)) {
         fprintf(stderr, "Unsupported codec!\n");
