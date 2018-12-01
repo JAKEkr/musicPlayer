@@ -177,6 +177,11 @@ int64_t get_decode_channel_layout(audio_entry *audio)
 	return av_get_default_channel_layout(audio->frame->channels);
 }
 
+int get_size_of_sample_buffer_per_channel(audio_entry *audio)
+{
+	return sizeof(audio->temp_buffer) / audio->target_channels / av_get_bytes_per_sample(audio->target_format);
+}
+
 
 /*
  * Decode one audio frame and return its uncompressed size
@@ -263,11 +268,10 @@ int audio_decode_frame(audio_entry *audio)
 					 }
 				 }
 
+				int sample_buffer_size = get_size_of_sample_buffer_per_channel(audio);
                 nb_sample_cnt_per_channel = swr_convert(audio->swr_ctx, out,
-                                   sizeof(audio->temp_buffer)
-                                   / audio->target_channels
-                                   / av_get_bytes_per_sample(audio->target_format),
-                                   in, audio->frame->nb_samples);
+                                   sample_buffer_size, in, audio->frame->nb_samples);
+
                 if (nb_sample_cnt_per_channel < 0) {
                     fprintf(stderr, "swr_convert() failed\n");
                     break;
