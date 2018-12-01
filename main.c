@@ -300,10 +300,10 @@ void audio_callback(void *userdata, Uint8 *stream, int len)
 }
 
 /* 사운드 매개 변수 및 사운드 파일 설정 */
-int stream_component_open(audio_entry *is, int stream_index)
+int stream_component_open(audio_entry *audio, int stream_index)
 {
-    AVFormatContext *ic = is->context;
-    AVCodecContext *codecCtx;					 //stream을 디코딩 할 때 필요한 정보
+    AVFormatContext *audio_ctx = audio->context;
+    AVCodecContext *codec_ctx;					 //stream을 디코딩 할 때 필요한 정보
     AVCodec *codec;
     SDL_AudioSpec wanted_spec;					 //오디오의 원하는 출력 형식을 나타내는 구조체
     SDL_AUdioSpec spec;						 //실제 매개 변수로 채워지는 구조체
@@ -311,12 +311,12 @@ int stream_component_open(audio_entry *is, int stream_index)
     int wanted_nb_channels;
 	const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
-    if (stream_index < 0 || stream_index >= ic->nb_streams) {    //오디오 코덱 없을 경우
+    if (stream_index < 0 || stream_index >= audio_ctx->nb_streams) {    //오디오 코덱 없을 경우
         return -1;
     }
 	
-    codecCtx = ic->streams[stream_index]->codec;		 //코덱 정보 저장
-	wanted_nb_channels = codecCtx->channels;
+    codec_ctx = audio_ctx->streams[stream_index]->codec;		 //코덱 정보 저장
+	wanted_nb_channels = codec_ctx->channels;
 	/* 채널 정보 저장 */
 	if(!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) { //av_get_channel_layout_nb_channels(unut64_t channel_layout) : 채널 레이아웃에서 채널 수를 반환
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			       //av_get_default_channel_layout (int nb_channels) : 지정된 채널 수에 대한 기본 채널 레이아웃을 반환
@@ -324,7 +324,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	}
 	
 	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
-	wanted_spec.freq = codecCtx->sample_rate;
+	wanted_spec.freq = codec_ctx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
 		fprintf(stderr, "Invalid sample rate or channel count!\n");	//에러 출력
 		return -1;
@@ -334,7 +334,7 @@ int stream_component_open(audio_entry *is, int stream_index)
 	wanted_spec.silence = 0;			//오디오가 signed 이기 때문에 0
 	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;	//SDL이 추가 오디오 데이터를 요청할 때를 대비한 오디오 버퍼의 사이즈
 	wanted_spec.callback = audio_callback;		//오디오 버퍼를 채우는 콜백함수
-	wanted_spec.userdata = is;			//콜백함수에 전달되는 유저 데이터
+	wanted_spec.userdata = audio;			//콜백함수에 전달되는 유저 데이터
 	
 	/* 
 	   실패시 출력 
@@ -375,29 +375,29 @@ int stream_component_open(audio_entry *is, int stream_index)
 	fprintf(stderr, "%d: spec.freq = %d\n", __LINE__, spec.freq);
 
 	/* 설정된 매개변수를 구조체에 저장 */
-	is->source_format = is->target_format = AV_SAMPLE_FMT_S16;			//샘플 형식
-	is->source_samplerate = is->target_samplerate = spec.freq;			//주파수
-	is->source_channel_layout = is->target_channel_layout = wanted_channel_layout;	//채널레이아웃
-	is->source_channels = is->target_channels = spec.channels;			//채널
+	audio->source_format = audio->target_format = AV_SAMPLE_FMT_S16;			//샘플 형식
+	audio->source_samplerate = audio->target_samplerate = spec.freq;			//주파수
+	audio->source_channel_layout = audio->target_channel_layout = wanted_channel_layout;	//채널레이아웃
+	audio->source_channels = audio->target_channels = spec.channels;			//채널
     
-    codec = avcodec_find_decoder(codecCtx->codec_id);	//avcodec_find_decoder(enum AVCodecID id) : 일치하는 코덱 id가 있는 등록 된 디코더를 찾는다 
+    codec = avcodec_find_decoder(codec_ctx->codec_id);	//avcodec_find_decoder(enum AVCodecID id) : 일치하는 코덱 id가 있는 등록 된 디코더를 찾는다 
     /* 
        avcodec_open2(AVCodecContext구조체, 방금찾은 AVCodec구조체, Decoder초기화에 필요한 추가옵션) 
        : 만일 디코더 정보가 존재한다면, AVCodecContext에 해당 정보를 넘겨줘서 디코더로 초기화 
     */
-    if (!codec || (avcodec_open2(codecCtx, codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
+    if (!codec || (avcodec_open2(codec_ctx, codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
         fprintf(stderr, "Unsupported codec!\n");
         return -1;
     }
-	ic->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
-    switch(codecCtx->codec_type) {
+	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
+    switch(codec_ctx->codec_type) {
     case AVMEDIA_TYPE_AUDIO:					//패킷 생성을 위한 각종 초기화
-        is->stream_index = stream_index;
-        is->stream = ic->streams[stream_index];
-        is->buffer_size = 0;
-        is->buffer_index = 0;
-        memset(&is->packet, 0, sizeof(is->packet));		//오디오 패킷만큼 동적할당
-        packet_queue_init(&is->queue);				//패킷큐 생성 후 링크
+        audio->stream_index = stream_index;
+        audio->stream = audio_ctx->streams[stream_index];
+        audio->buffer_size = 0;
+        audio->buffer_index = 0;
+        memset(&audio->packet, 0, sizeof(audio->packet));		//오디오 패킷만큼 동적할당
+        packet_queue_init(&audio->queue);				//패킷큐 생성 후 링크
         SDL_PauseAudio(0);					//실질적으로 재생하는 부분, 인자가 0이면 재생
         break;
     default:
