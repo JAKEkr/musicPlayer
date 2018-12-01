@@ -373,7 +373,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
     int nb_channels_layout;
     const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
-    if (stream_index < 0 || stream_index >= audio_ctx->nb_streams)    //오디오 코덱 없을 경우
+    if ((stream_index < 0) || (stream_index >= audio_ctx->nb_streams))   //오디오 코덱 없을 경우
         return;
 	
 	wanted_nb_channels = audio->codec_ctx->channels;
@@ -450,7 +450,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
        avcodec_open2(AVCodecContext구조체, 방금찾은 AVCodec구조체, Decoder초기화에 필요한 추가옵션) 
        : 만일 디코더 정보가 존재한다면, AVCodecContext에 해당 정보를 넘겨줘서 디코더로 초기화 
     */
-    if (!audio->codec_ctx->codec || (avcodec_open2(codec_ctx, codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
+    if (!audio->codec_ctx->codec || (avcodec_open2(audio->codec_ctx, audio->codec_ctx->codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
         fprintf(stderr, "Unsupported codec!\n");
         return;
     }
@@ -529,7 +529,7 @@ static int decode_thread(void *st_audio_entry)
         goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
     }
 
-    codec = avcodec_find_decoder(audio_ctx->streams[stream_index]->codecpar->codec_id);
+    codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id);
     
     if (!codec) {
 		fprintf(stderr, "Failed to find decoder for stream #%u\n", stream_index);
