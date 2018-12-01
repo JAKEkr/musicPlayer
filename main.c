@@ -278,18 +278,18 @@ void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_b
     audio_entry *audio = (audio_entry *)st_audio_entry; //audio_entry 구조체 포인터 "audio"에 audio_data_stream을 통해 넘어온 void 포인터 st_audio_entry가 가리키는 audio 포인터 구조체 할당
     int transport_buffer_length, audio_data_size; //넘길 버퍼의 길이 "transport_buffer_length", 디코딩 된 프레임 크기가 저장될 "audio_data_size" 변수 선언
 
-    while (stream_buffer_length > 0) { //audio_data_stream을 통해 전송되온 버퍼 내 바이트의 길이 "stream_buffer_length"이 0보다 크면 루프
-        if (audio->buffer_index >= audio->buffer_size) { //인덱스가 사이즈보다 크면
+    while (stream_buffer_length > 0) {
+        if (audio->buffer_index >= audio->buffer_size) {
             audio_data_size = audio_decode_frame(audio); // "audio"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
 
-            if(audio_data_size < 0) {//만약 데이터 사이즈가 0보다 작으면
+            if(audio_data_size < 0) {
                 /* silence */
-                audio->buffer_size = 1024; // "audio"의 buffer_size 인자를 1024로 설정
+                audio->buffer_size = 1024;
                 memset(audio->buffer, 0, audio->buffer_size); //"audio"의 buffer인자의 시작주소부터 "audio"의 buffer_size인자만큼 0으로 초기화한다.
             } else {
-                audio->buffer_size = audio_data_size; //"audio"의 buffer_size인자에 audio_data_size를 대입한다.
+                audio->buffer_size = audio_data_size;
             }
-            audio->buffer_index = 0; //"audio"의 buffer_size인자에 audio_data_size를 대입한다.
+            audio->buffer_index = 0;
         }
 
         transport_buffer_length = audio->buffer_size - audio->buffer_index; //넘겨줄 버퍼의 길이 "transport_buffer_length"에 "audio"의 buffer_size 인자 = buffer_index인자를 대입한다.
