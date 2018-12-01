@@ -300,7 +300,7 @@ void audio_callback(void *userdata, Uint8 *stream, int len)
 }
 
 /* 사운드 매개 변수 및 사운드 파일 설정 */
-int stream_component_open(audio_entry *audio, int stream_index)
+void stream_component_open(audio_entry *audio, int stream_index)
 {
     AVFormatContext *audio_ctx = audio->context;
     AVCodecContext *codec_ctx;					 //stream을 디코딩 할 때 필요한 정보
@@ -313,7 +313,7 @@ int stream_component_open(audio_entry *audio, int stream_index)
     const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
     if (stream_index < 0 || stream_index >= audio_ctx->nb_streams) {    //오디오 코덱 없을 경우
-        return -1;
+        return;
     }
 	
     codec_ctx = audio_ctx->streams[stream_index]->codec;		 //코덱 정보 저장
@@ -329,7 +329,7 @@ int stream_component_open(audio_entry *audio, int stream_index)
 	wanted_spec.freq = codec_ctx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
 		fprintf(stderr, "Invalid sample rate or channel count!\n");	//에러 출력
-		return -1;
+		return;
 	}
 	/* 오디오 정보를 담는 구조체 설정 */
 	wanted_spec.format = AUDIO_S16SYS;		//SDL에게 어떤 형식으로 제공할 것인지 알려준다, signed 각 샘플 길이는 16비트
@@ -347,20 +347,20 @@ int stream_component_open(audio_entry *audio, int stream_index)
 		wanted_spec.channels = next_nb_channels[FFMIN(7, wanted_spec.channels)];	//FFMIN() : ffmpeg에 의해 정의 된 매크로로 더 작은 수를 반환
 		if(!wanted_spec.channels) {
 			fprintf(stderr, "No more channel combinations to try, audio open failed\n");
-			return -1;
+			return;
 		}
 		wanted_channel_layout = av_get_default_channel_layout(wanted_spec.channels);
 	}
 
 	if (spec.format != AUDIO_S16SYS) { //형식이 지원 안 될 경우
 		fprintf(stderr, "SDL advised audio format %d is not supported!\n", spec.format);
-		return -1;
+		return;
 	}
 	if (spec.channels != wanted_spec.channels) { //출력하고자 하는 채널과 실제 매개 변수의 채널이 다를 경우
 		wanted_channel_layout = av_get_default_channel_layout(spec.channels); //실제 매개 변수의 채널 수에 대한 채널 레이아웃을 출력하고자 하는 채널 레이아웃에 넣는다
 		if (!wanted_channel_layout) {
 			fprintf(stderr, "SDL advised channel count %d is not supported!\n", spec.channels);
-			return -1;
+			return;
 		}
 	}
 
@@ -389,7 +389,7 @@ int stream_component_open(audio_entry *audio, int stream_index)
     */
     if (!codec || (avcodec_open2(codec_ctx, codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
         fprintf(stderr, "Unsupported codec!\n");
-        return -1;
+        return;
     }
 	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
     switch(codec_ctx->codec_type) {
