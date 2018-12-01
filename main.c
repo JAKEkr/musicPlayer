@@ -10,14 +10,11 @@
 #include <stdio.h>
 #include <math.h>
 
-#define SDL_AUDIO_BUFFER_SIZE 1024 
-#define MAX_AUDIOQ_SIZE (1 * 1024 * 1024)
-#define FF_ALLOC_EVENT   (SDL_USEREVENT)
-#define FF_REFRESH_EVENT (SDL_USEREVENT + 1)
-#define FF_QUIT_EVENT (SDL_USEREVENT + 2)
+#define SDL_AUDIO_BUFFER_SIZE 1024
+#define AVCODEC_MAX_AUDIO_FRAME_SIZE 192000
 
-// FFMPEG 라이브러리 버전업으로 해당 매크로가 사라진 관계로 임의로 정의해놓음
-#define AVCODEC_MAX_AUDIO_FRAME_SIZE 1024 * 1024 * 4
+#define ERROR_EVENT SDL_USEREVENT
+#define QUIT_EVENT (SDL_USEREVENT + 1)
 
 #define TRUE 1
 #define FALSE 0
@@ -448,10 +445,10 @@ static int decode_thread(void *st_audio_entry)
     }
 
     // main decode loop
-    for(;;) {
+    while(TRUE) {
         if(audio->state) break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
 
-        if (audio->queue.size > MAX_AUDIOQ_SIZE) {
+        if (audio->queue.size > AVCODEC_MAX_AUDIO_FRAME_SIZE) {
             SDL_Delay(10);
             continue;
         } // 오디오 패킷 큐의 오버플로우 검사
@@ -482,7 +479,7 @@ static int decode_thread(void *st_audio_entry)
 
 fail: {
         SDL_Event event;
-        event.type = FF_QUIT_EVENT;
+        event.type = QUIT_EVENT;
         event.user.data1 = audio;
         SDL_PushEvent(&event);
     } // 오디오 스트림 탐색 실패시 메인 쓰레드로 종료 이벤트 전달
@@ -521,7 +518,7 @@ int main(int argc, char **argv)
     {
         SDL_WaitEvent(&event);
         switch(event.type) {
-        case FF_QUIT_EVENT:
+        case QUIT_EVENT:
         case SDL_QUIT:
             audio->state = 1;
             SDL_Quit();
