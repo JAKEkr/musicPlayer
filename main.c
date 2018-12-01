@@ -309,7 +309,8 @@ int stream_component_open(audio_entry *audio, int stream_index)
     SDL_AUdioSpec spec;						 //실제 매개 변수로 채워지는 구조체
     int64_t wanted_channel_layout = 0;				 //64비트(8바이트) 크기의 부호 있는 정수형 채널 레이아웃
     int wanted_nb_channels;
-	const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
+    int nb_channels_layout;
+    const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
     if (stream_index < 0 || stream_index >= audio_ctx->nb_streams) {    //오디오 코덱 없을 경우
         return -1;
@@ -318,12 +319,13 @@ int stream_component_open(audio_entry *audio, int stream_index)
     codec_ctx = audio_ctx->streams[stream_index]->codec;		 //코덱 정보 저장
 	wanted_nb_channels = codec_ctx->channels;
 	/* 채널 정보 저장 */
-	if(!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) { //av_get_channel_layout_nb_channels(unut64_t channel_layout) : 채널 레이아웃에서 채널 수를 반환
+	nb_channels_layout = av_get_channel_layout_nb_channels(wanted_channel_layout);
+	if(!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) { //av_get_channel_layout_nb_channels(unut64_t channel_layout) : 채널 레이아웃에서 채널 수를 반환
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			       //av_get_default_channel_layout (int nb_channels) : 지정된 채널 수에 대한 기본 채널 레이아웃을 반환
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
 	
-	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
+	wanted_spec.channels = nb_channels_layout);
 	wanted_spec.freq = codec_ctx->sample_rate;
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
 		fprintf(stderr, "Invalid sample rate or channel count!\n");	//에러 출력
