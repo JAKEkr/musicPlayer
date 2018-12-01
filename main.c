@@ -368,8 +368,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
     AVFormatContext *audio_ctx = audio->context;
     AVCodecContext *codec_ctx;					 
     AVCodec *codec;
-    SDL_AudioSpec wanted_spec;					 
-    SDL_AUdioSpec spec;						 
+    SDL_AudioSpec spec, wanted_spec;		 
     int64_t wanted_channel_layout = 0;				 
     int wanted_nb_channels;
     int nb_channels_layout;
@@ -388,7 +387,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
 	
-	wanted_spec.channels = nb_channels_layout);
+	wanted_spec.channels = nb_channels_layout;
 	wanted_spec.freq = codec_ctx->sample_rate;
 
 	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
@@ -544,7 +543,7 @@ static int decode_thread(void *st_audio_entry)
 
         if (next_frame_index < 0) {
             // TODO: if & continue 문 간략하게 만들 것
-            if(next_frame_index == AVERROR_EOF || url_feof(audio->context->pb)) {
+            if(next_frame_index == AVERROR_EOF || avio_feof(audio->context->pb)) {
                 break;
             }
             if(audio->context->pb && audio->context->pb->error) {
