@@ -143,7 +143,7 @@ static void packet_queue_flush(PacketQueue *q)
     SDL_LockMutex(q->mutex);
     for (pkt = q->first_pkt; pkt != NULL; pkt = pkt1) {
         pkt1 = pkt->next;
-        av_free_packet(&pkt->pkt);
+        av_packet_unref(&pkt->pkt);
         av_freep(&pkt);
     }
     q->last_pkt = NULL;
@@ -163,14 +163,14 @@ int is_same_channel_cnt_in_frame(audio_entry *audio)
 int have_channel_layout(audio_entry *audio)
 {
 	if (audio->frame->channel_layout > 0)
-		return true;
-	return false;
+		return TRUE;
+	return FALSE;
 }
 
 int64_t get_decode_channel_layout(audio_entry *audio)
 {
-	if(have_channel_layout(is) && is_same_channel_cnt_in_frame(is))
-		return audio->frame->channel_layout
+	if(have_channel_layout(audio) && is_same_channel_cnt_in_frame(audio))
+		return audio->frame->channel_layout;
 	return av_get_default_channel_layout(audio->frame->channels);
 }
 
@@ -237,13 +237,13 @@ int audio_decode_frame(audio_entry *audio)
 			deccoded_channel_layout = get_decode_channel_layout(audio);
 
 			// 출력 하고자 하는 정보에 분석한 프레임의 채널당 오디오 샘플 수를 저장
-            wanted_nb_samples = audio->frame->nb_samples;
+            wanted_nb_samples_per_channel = audio->frame->nb_samples;
 
 			// 디코딩되노 frame과 할당 받았던 자원 정보가 일치하는지 판단
             if (audio->frame->format != audio->source_format ||
                 deccoded_channel_layout != audio->source_channel_layout ||
                 audio->frame->sample_rate != audio->source_samplerate ||
-                (wanted_nb_samples != audio->frame->nb_samples && !audio->swr_ctx)) {
+                (wanted_nb_samples_per_channel != audio->frame->nb_samples && !audio->swr_ctx)) {
 				// 메모리 할당 되있다면 해제
                 if (audio->swr_ctx) swr_free(&audio->swr_ctx);
 				// 원하는 정보로 재할당
@@ -271,11 +271,11 @@ int audio_decode_frame(audio_entry *audio)
             if (audio->swr_ctx) {
                 const uint8_t **in = (const uint8_t **)audio->frame->extended_data;	 // 압축된 오디오 패킷을 가리키기 위해 더블포인터 사용
                 uint8_t *out[] = { audio->temp_buffer }; // 오디오로 변환된 프레임 데이터를 저장할 버퍼를 가리키는 포인터 배열
-				if (wanted_nb_samples != audio->frame->nb_samples) {
+				if (wanted_nb_samples_per_channel != audio->frame->nb_samples) {
 					// swr_ctx에 오디오 정보들을 resampling하여 swr
-					 if (swr_set_compensation(audio->swr_ctx, (wanted_nb_samples - audio->frame->nb_samples)
+					 if (swr_set_compensation(audio->swr_ctx, (wanted_nb_samples_per_channel - audio->frame->nb_samples)
 												 * audio->target_samplerate / audio->frame->sample_rate,
-												 wanted_nb_samples * audio->target_samplerate / audio->frame->sample_rate) < 0) {
+												 wanted_nb_samples_per_channel * audio->target_samplerate / audio->frame->sample_rate) < 0) {
 						 fprintf(stderr, "swr_set_compensation() failed\n");
 						 break;
 					 }
@@ -309,7 +309,7 @@ int audio_decode_frame(audio_entry *audio)
         }
 
 		// 프레임 디코딩에 문제가 생겨 초기화
-        if (packet->data) av_free_packet(packet);
+        if (packet->data) av_packet_unref(packet);
 		memset(packet, 0, sizeof(*packet));
         if (audio->state) return -1;
         if (packet_queue_get(&audio->queue, packet, 1) < 0) return -1;
@@ -328,7 +328,7 @@ int audio_decode_frame(audio_entry *audio)
 void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
     audio_entry *audio = (audio_entry *)st_audio_entry;
-    int transport_buffer_length
+    int transport_buffer_length;
     int audio_data_size;
 
     while (stream_buffer_length > 0) {
@@ -556,7 +556,7 @@ static int decode_thread(void *st_audio_entry)
         if (packet->stream_index == audio->stream_index) {
             packet_queue_put(&audio->queue, packet);
         } else {
-            av_free_packet(packet);
+            av_packet_unref(packet);
         } // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
