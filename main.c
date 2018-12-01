@@ -156,6 +156,28 @@ static void packet_queue_flush(PacketQueue *q)
     SDL_UnlockMutex(q->mutex);
 }
 
+int is_same_channel_cnt_in_frame(audio_entry *audio)
+{
+	if (audio->frame->channels == av_get_channel_layout_nb_channels(audio->frame->channel_layout))
+		return TRUE;
+	return FALSE;
+}
+
+int have_channel_layout(audio_entry *audio)
+{
+	if (audio->frame->channel_layout > 0)
+		return true;
+	return false;
+}
+
+int64_t get_decode_channel_layout(audio_entry *audio)
+{
+	if(have_channel_layout(is) && is_same_channel_cnt_in_frame(is))
+		return audio->frame->channel_layout
+	return av_get_default_channel_layout(audio->frame->channels);
+}
+
+
 /*
  * Decode one audio frame and return its uncompressed size
  *
@@ -172,7 +194,7 @@ int audio_decode_frame(audio_entry *audio)
 	int decoded_data_size;
     AVPacket *packet = &audio->packet;
     int got_frame = 0;	// 프레임을 얻을수 있는지 없는지 판단 여부
-    int64_t deccoded_channel_layout_cnt;	
+    int64_t deccoded_channel_layout;	
 	int wanted_nb_samples_per_channel;
 	int resampled_data_size;	// 최종적으로 오디오로 변환된 데이터 크기
 
@@ -203,15 +225,12 @@ int audio_decode_frame(audio_entry *audio)
                                 audio->frame->nb_samples,
                                 audio->frame->format, 1);
 
-            deccoded_channel_layout_cnt = (audio->frame->channel_layout && audio->frame->channels
-                                  == av_get_channel_layout_nb_channels(audio->frame->channel_layout))
-                                 ? audio->frame->channel_layout
-                                 : av_get_default_channel_layout(audio->frame->channels);
+			deccoded_channel_layout = get_decode_channel_layout(audio);
 
             wanted_nb_samples =  audio->frame->nb_samples;
 
             if (audio->frame->format != audio->source_format ||
-                deccoded_channel_layout_cnt != audio->source_channel_layout ||
+                deccoded_channel_layout != audio->source_channel_layout ||
                 audio->frame->sample_rate != audio->source_samplerate ||
                 (wanted_nb_samples != audio->frame->nb_samples && !audio->swr_ctx)) {
                 if (audio->swr_ctx) swr_free(&audio->swr_ctx);
@@ -219,7 +238,7 @@ int audio_decode_frame(audio_entry *audio)
                                                  audio->target_channel_layout,
                                                  audio->target_format,
                                                  audio->target_samplerate,
-                                                 deccoded_channel_layout_cnt,
+                                                 deccoded_channel_layout,
                                                  audio->frame->format,
                                                  audio->frame->sample_rate,
                                                  0, NULL);
@@ -227,7 +246,7 @@ int audio_decode_frame(audio_entry *audio)
                     fprintf(stderr, "swr_init() failed\n");
                     break;
                 }
-                audio->source_channel_layout = deccoded_channel_layout_cnt;
+                audio->source_channel_layout = deccoded_channel_layout;
                 audio->source_channels = audio->stream->codec->channels;
                 audio->source_samplerate = audio->stream->codec->sample_rate;
                 audio->source_format = audio->stream->codec->sample_fmt;
