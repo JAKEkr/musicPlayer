@@ -384,20 +384,18 @@ void stream_component_open(audio_entry *audio, int stream_index)
         return; //오디오 코덱 없을 경우
 	
 	wanted_nb_channels = audio->codec_ctx->channels;
-	/* 채널 정보 저장 */
-	nb_channels_layout = av_get_channel_layout_nb_channels(wanted_channel_layout);
 
-	if (!wanted_channel_layout || wanted_nb_channels != nb_channels_layout) {
-		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);			     
+	if(!wanted_channel_layout || wanted_nb_channels != av_get_channel_layout_nb_channels(wanted_channel_layout)) {
+		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
 	
-	wanted_spec.channels = nb_channels_layout;
+	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
 	wanted_spec.freq = audio->codec_ctx->sample_rate;
 
-	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {		//오디오 주파수가 유효하지 않거나 채널 수가 유효하지 않다면
-		fprintf(stderr, "Invalid sample rate or channel count!\n");	
-		return;
+	if (wanted_spec.freq <= 0 || wanted_spec.channels <= 0) {
+		fprintf(stderr, "Invalid sample rate or channel count!\n");
+		return -1;
 	}
 
 	/* 오디오 정보를 담는 구조체 설정 */
@@ -544,7 +542,7 @@ static int decode_thread(void *st_audio_entry)
         return -1;
     }
 
-    stream_component_open(audio, audio_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
+    stream_component_open(audio, audio->stream_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
     packet = (AVPacket *)malloc(sizeof(AVPacket));
 
