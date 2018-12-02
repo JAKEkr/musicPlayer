@@ -477,16 +477,19 @@ int stream_component_open(audio_entry *audio, int stream_index)
 
     return 0;
 }
-/*
-static void stream_component_close(VideoState *is, int stream_index) {
-	AVFormatContext *oc = is->;
-	AVCodecContext *avctx;
 
-	if(stream_index < 0 || stream_index >= ic->nb_streams)	return;
-	avctx = ic->streams[stream_index]->codec;
+int quit_thread(audio_entry *st_audio_entry, int event_number)
+{
+    SDL_Event event;
+    
+    event.type = event_number;
+    event.user.data1 = st_audio_entry;
 
+    if (SDL_PushEvent(&event) == -1)
+        return FALSE;
+
+    return TRUE;
 }
-*/
 
 /*
  * static int decode_thread(void *);
@@ -507,12 +510,14 @@ static int decode_thread(void *st_audio_entry)
     audio->stream_index = -1;
 
     if (avformat_open_input(&audio_ctx, audio->filename, NULL, NULL) != 0) {
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     } // 해당 오디오 파일을 오픈하고, 전달한 AVFormatContext 구조체 주소에 헤더 정보 저장
 
     audio->format_ctx = audio_ctx;
 
     if (avformat_find_stream_info(audio_ctx, NULL) < 0) {
+        quit_thread(audio, ERROR_EVENT;
         return -1;
     } // 오디오 헤더로부터 스트림 정보 검색
 
@@ -527,13 +532,15 @@ static int decode_thread(void *st_audio_entry)
 
     if (audio->stream_index < 0) {
         fprintf(stderr, "%s: could not open codecs\n", audio->filename);
-        goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
+        quit_thread(audio, ERROR_EVENT);
+        return -1
     }
 
     codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id);
     
     if (!codec) {
 		fprintf(stderr, "Failed to find decoder for stream #%u\n", audio->stream_index);
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     }
     
@@ -541,15 +548,21 @@ static int decode_thread(void *st_audio_entry)
     
     if (!audio->codec_ctx) {
 		fprintf(stderr, "Failed to allocate the decoder context for stream #%u\n", audio->stream_index);
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     }
 
     if (avcodec_open2(audio->codec_ctx, codec, NULL) < 0) {
         fprintf(stderr, "Could not open codec\n");
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     }
 
-    stream_component_open(audio, audio->stream_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
+    if (stream_component_open(audio, audio->stream_index) == -1) {
+        fprintf(stderr, "Failed to call stream_component_open function.\n");
+        quit_thread(audio, ERROR_EVENT);
+        return -1;
+    } // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
     packet = (AVPacket *)malloc(sizeof(AVPacket));
 
@@ -586,12 +599,7 @@ static int decode_thread(void *st_audio_entry)
         SDL_Delay(100);
     } // 다른 쓰레드와 종료 시점 동기화
 
-fail: {
-        SDL_Event event;
-        event.type = QUIT_EVENT;
-        event.user.data1 = audio;
-        SDL_PushEvent(&event);
-    } // 오디오 스트림 탐색 실패시 메인 쓰레드로 종료 이벤트 전달
+    quit_thread(audio, QUIT_EVENT);
 
     return 0;
 }
@@ -620,21 +628,28 @@ int main(int argc, char **argv)
     audio->thread_id = SDL_CreateThread(decode_thread, audio);
     if (!audio->thread_id) {
         av_free(audio);
-        return -1;
+        exit(1);
     }
 
     while (TRUE)
     {
         SDL_WaitEvent(&event);
+
         switch(event.type) {
-        case QUIT_EVENT:
-        case SDL_QUIT:
-            audio->state = 1;
-            SDL_Quit();
-            exit(0);
-            break;
-        default:
-            break;
+            case ERROR_EVENT:
+                av_free(audio);
+                exit(1);
+                break;
+            case QUIT_EVENT:
+                SDL_Quit();
+                exit(0);
+                break;
+            case SDL_QUIT:
+                SDL_Quit();
+                exit(0);
+                break;
+            default:
+                break;
         }
     }
 
