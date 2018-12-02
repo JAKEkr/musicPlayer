@@ -105,14 +105,6 @@ static int packet_queue_get(PacketQueue *q, AVPacket *packet, int block)
 
     while(TRUE) {
 
-        // FIXME: Not working
-        /*
-        if(global_video_state->quit) {
-            ret = -1;
-            break;
-        }
-        */
-
         packet_list = q->first_pkt;
 
         if (packet_list) {
@@ -367,11 +359,11 @@ void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_b
 }
 
 /* 
- * void stream_component_open(audio_entry *, int)
+ * int stream_component_open(audio_entry *, int)
  * 
  * audio_entry구조체와 stream index를 매개변수로 받아 사운드 매개 변수 및 사운드 파일을 설정하는 함수
  */
-void stream_component_open(audio_entry *audio, int stream_index)
+int stream_component_open(audio_entry *audio, int stream_index)
 {
     AVFormatContext *audio_ctx = audio->format_ctx;
     SDL_AudioSpec spec, wanted_spec;		 
@@ -381,7 +373,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
     const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
     if (stream_index < 0 || stream_index >= audio_ctx->nb_streams)
-        return; //오디오 코덱 없을 경우
+        return -1; //오디오 코덱 없을 경우
 	
 	wanted_nb_channels = audio->codec_ctx->channels;
 
@@ -389,7 +381,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
 		wanted_channel_layout = av_get_default_channel_layout(wanted_nb_channels);
 		wanted_channel_layout &= ~AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
-	
+
 	wanted_spec.channels = av_get_channel_layout_nb_channels(wanted_channel_layout);
 	wanted_spec.freq = audio->codec_ctx->sample_rate;
 
@@ -414,21 +406,21 @@ void stream_component_open(audio_entry *audio, int stream_index)
 		wanted_spec.channels = next_nb_channels[FFMIN(7, wanted_spec.channels)];	//FFMIN() : ffmpeg에 의해 정의 된 매크로로 더 작은 수를 반환
 		if(!wanted_spec.channels) {
 			fprintf(stderr, "No more channel combinations to try, audio open failed\n");
-			return;
+			return -1;
 		}
 		wanted_channel_layout = av_get_default_channel_layout(wanted_spec.channels);
 	}
 
 	if (spec.format != AUDIO_S16SYS) { //형식이 지원 안 될 경우
 		fprintf(stderr, "SDL advised audio format %d is not supported!\n", spec.format);
-		return;
+		return -1;
 	}
 
 	if (spec.channels != wanted_spec.channels) { //출력하고자 하는 채널과 실제 매개 변수의 채널이 다를 경우
 		wanted_channel_layout = av_get_default_channel_layout(spec.channels);
 		if (!wanted_channel_layout) {
 			fprintf(stderr, "SDL advised channel count %d is not supported!\n", spec.channels);
-			return;
+			return -1;
 		}
 	}
 
@@ -457,7 +449,7 @@ void stream_component_open(audio_entry *audio, int stream_index)
     */
     if (!audio->codec_ctx->codec || (avcodec_open2(audio->codec_ctx, audio->codec_ctx->codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
         fprintf(stderr, "Unsupported codec!\n");
-        return;
+        return -1;
     }
 
 	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
@@ -474,17 +466,22 @@ void stream_component_open(audio_entry *audio, int stream_index)
     default:
         break;
     }
-}
-/*
-static void stream_component_close(VideoState *is, int stream_index) {
-	AVFormatContext *oc = is->;
-	AVCodecContext *avctx;
 
-	if(stream_index < 0 || stream_index >= ic->nb_streams)	return;
-	avctx = ic->streams[stream_index]->codec;
-
+    return 0;
 }
-*/
+
+int quit_thread(audio_entry *st_audio_entry, int event_number)
+{
+    SDL_Event event;
+    
+    event.type = event_number;
+    event.user.data1 = st_audio_entry;
+
+    if (SDL_PushEvent(&event) == -1)
+        return FALSE;
+
+    return TRUE;
+}
 
 /*
  * static int decode_thread(void *);
@@ -505,12 +502,14 @@ static int decode_thread(void *st_audio_entry)
     audio->stream_index = -1;
 
     if (avformat_open_input(&audio_ctx, audio->filename, NULL, NULL) != 0) {
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     } // 해당 오디오 파일을 오픈하고, 전달한 AVFormatContext 구조체 주소에 헤더 정보 저장
 
     audio->format_ctx = audio_ctx;
 
     if (avformat_find_stream_info(audio_ctx, NULL) < 0) {
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     } // 오디오 헤더로부터 스트림 정보 검색
 
@@ -525,13 +524,15 @@ static int decode_thread(void *st_audio_entry)
 
     if (audio->stream_index < 0) {
         fprintf(stderr, "%s: could not open codecs\n", audio->filename);
-        goto fail; // TODO: goto 함수 풀어서 자연스럽게 종료 하도록 유도할 것
+        quit_thread(audio, ERROR_EVENT);
+        return -1;
     }
 
     codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id);
     
     if (!codec) {
 		fprintf(stderr, "Failed to find decoder for stream #%u\n", audio->stream_index);
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     }
     
@@ -539,15 +540,21 @@ static int decode_thread(void *st_audio_entry)
     
     if (!audio->codec_ctx) {
 		fprintf(stderr, "Failed to allocate the decoder context for stream #%u\n", audio->stream_index);
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     }
 
     if (avcodec_open2(audio->codec_ctx, codec, NULL) < 0) {
         fprintf(stderr, "Could not open codec\n");
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     }
 
-    stream_component_open(audio, audio->stream_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
+    if (stream_component_open(audio, audio->stream_index) == -1) {
+        fprintf(stderr, "Failed to call stream_component_open function.\n");
+        quit_thread(audio, ERROR_EVENT);
+        return -1;
+    } // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
     packet = (AVPacket *)malloc(sizeof(AVPacket));
 
@@ -564,14 +571,12 @@ static int decode_thread(void *st_audio_entry)
         next_frame_index = av_read_frame(audio->format_ctx, packet); // 프레임의 저장된 내용을 packet에 저장하고, 다음 프레임 인덱스 번호 리턴
 
         if (next_frame_index < 0) {
-            // TODO: if & continue 문 간략하게 만들 것
-            if(next_frame_index == AVERROR_EOF || avio_feof(audio->format_ctx->pb)) {
+            if(next_frame_index == AVERROR_EOF || avio_feof(audio->format_ctx->pb))
                 break;
-            }
-            if(audio->format_ctx->pb && audio->format_ctx->pb->error) {
+            else if(audio->format_ctx->pb && audio->format_ctx->pb->error)
                 break;
-            }
-            continue;
+            else
+                continue;
         } // 실패 요인에 파일의 끝 혹은 타 에러 발생 여부 검사
 
         if (packet->stream_index == audio->stream_index)
@@ -580,20 +585,19 @@ static int decode_thread(void *st_audio_entry)
             av_packet_unref(packet); // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
-    while (!audio->state) {
-        SDL_Delay(100);
-    } // 다른 쓰레드와 종료 시점 동기화
+    while (!audio->state)
+        SDL_Delay(100); // 다른 쓰레드와 종료 시점 동기화
 
-fail: {
-        SDL_Event event;
-        event.type = QUIT_EVENT;
-        event.user.data1 = audio;
-        SDL_PushEvent(&event);
-    } // 오디오 스트림 탐색 실패시 메인 쓰레드로 종료 이벤트 전달
+    quit_thread(audio, QUIT_EVENT);
 
     return 0;
 }
 
+/* 
+ * int main(int, char **)
+ *
+ * 리눅스 터미널에서 오디오 파일명을 받아 SDL Thread를 초기화한 호, Thread를 생성하여 오디오 재생을 담당하는 함수 호출
+ */
 int main(int argc, char **argv)
 {
     SDL_Event event;
@@ -606,9 +610,9 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    av_register_all();
+    av_register_all(); // codecs, parser, bit stream filter등 오디오 코덱 관련 요소들을 초기화
 
-    if (SDL_Init(SDL_INIT_AUDIO)) {
+    if (SDL_Init(SDL_INIT_AUDIO)) { // SDL 오디오 서브스트림을 초기화
         fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
         exit(1);
     }
@@ -618,21 +622,28 @@ int main(int argc, char **argv)
     audio->thread_id = SDL_CreateThread(decode_thread, audio);
     if (!audio->thread_id) {
         av_free(audio);
-        return -1;
+        exit(1);
     }
 
     while (TRUE)
     {
         SDL_WaitEvent(&event);
+
         switch(event.type) {
-        case QUIT_EVENT:
-        case SDL_QUIT:
-            audio->state = 1;
-            SDL_Quit();
-            exit(0);
-            break;
-        default:
-            break;
+            case ERROR_EVENT:
+                av_free(audio);
+                exit(1);
+                break;
+            case QUIT_EVENT:
+                SDL_Quit();
+                exit(0);
+                break;
+            case SDL_QUIT:
+                SDL_Quit();
+                exit(0);
+                break;
+            default:
+                break;
         }
     }
 
