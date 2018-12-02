@@ -495,11 +495,9 @@ static int decode_thread(void *st_audio_entry)
     AVFormatContext *audio_ctx = NULL;
     AVCodec *codec = NULL;
     AVPacket *packet = NULL;
-    int i, next_frame_index, audio_index = -1;
+    int i, next_frame_index;
 
     audio->stream_index = -1;
-
-    //global_video_state = is;
 
     if (avformat_open_input(&audio_ctx, audio->filename, NULL, NULL) != 0) {
         return -1;
@@ -514,15 +512,11 @@ static int decode_thread(void *st_audio_entry)
     av_dump_format(audio_ctx, 0, audio->filename, 0); // 디버깅을 위해 파일의 헤더 정보를 표준 에러로 덤프
 
     for (i = 0; i < audio_ctx->nb_streams; i++) {
-        if (audio_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audio_index < 0) {
-            audio_index = i;
+        if (audio_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audio->stream_index = i;
             break;
         }
     } // 오디오 코덱이 존재하는 스트림 인덱스 번호 탐색
-
-    if (audio_index >= 0) {
-        stream_component_open(audio, audio_index);
-    } // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
     if (audio->stream_index < 0) {
         fprintf(stderr, "%s: could not open codecs\n", audio->filename);
@@ -542,6 +536,8 @@ static int decode_thread(void *st_audio_entry)
 		fprintf(stderr, "Failed to allocate the decoder context for stream #%u\n", audio->stream_index);
         return -1;
     }
+
+    stream_component_open(audio, audio_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
     // main decode loop
     while(TRUE) {
