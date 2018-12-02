@@ -105,14 +105,6 @@ static int packet_queue_get(PacketQueue *q, AVPacket *packet, int block)
 
     while(TRUE) {
 
-        // FIXME: Not working
-        /*
-        if(global_video_state->quit) {
-            ret = -1;
-            break;
-        }
-        */
-
         packet_list = q->first_pkt;
 
         if (packet_list) {
@@ -517,7 +509,7 @@ static int decode_thread(void *st_audio_entry)
     audio->format_ctx = audio_ctx;
 
     if (avformat_find_stream_info(audio_ctx, NULL) < 0) {
-        quit_thread(audio, ERROR_EVENT;
+        quit_thread(audio, ERROR_EVENT);
         return -1;
     } // 오디오 헤더로부터 스트림 정보 검색
 
@@ -533,7 +525,7 @@ static int decode_thread(void *st_audio_entry)
     if (audio->stream_index < 0) {
         fprintf(stderr, "%s: could not open codecs\n", audio->filename);
         quit_thread(audio, ERROR_EVENT);
-        return -1
+        return -1;
     }
 
     codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id);
@@ -579,14 +571,12 @@ static int decode_thread(void *st_audio_entry)
         next_frame_index = av_read_frame(audio->format_ctx, packet); // 프레임의 저장된 내용을 packet에 저장하고, 다음 프레임 인덱스 번호 리턴
 
         if (next_frame_index < 0) {
-            // TODO: if & continue 문 간략하게 만들 것
-            if(next_frame_index == AVERROR_EOF || avio_feof(audio->format_ctx->pb)) {
+            if(next_frame_index == AVERROR_EOF || avio_feof(audio->format_ctx->pb))
                 break;
-            }
-            if(audio->format_ctx->pb && audio->format_ctx->pb->error) {
+            else if(audio->format_ctx->pb && audio->format_ctx->pb->error)
                 break;
-            }
-            continue;
+            else
+                continue;
         } // 실패 요인에 파일의 끝 혹은 타 에러 발생 여부 검사
 
         if (packet->stream_index == audio->stream_index)
@@ -595,51 +585,42 @@ static int decode_thread(void *st_audio_entry)
             av_packet_unref(packet); // 해당 오디오 스트림이 아닐 경우 얻어온 패킷의 메모리 해제
     }
 
-    while (!audio->state) {
-        SDL_Delay(100);
-    } // 다른 쓰레드와 종료 시점 동기화
+    while (!audio->state)
+        SDL_Delay(100); // 다른 쓰레드와 종료 시점 동기화
 
     quit_thread(audio, QUIT_EVENT);
 
     return 0;
 }
 
-/* int main(int, char **)
+/* 
+ * int main(int, char **)
  *
- * 프로그램의 메인함수이며 전체적인 프로그램의 구동을 시작하는 함수이다.
- * 좀 더 자세히 설명하자면
- * 리눅스 터미널 내부에서 파일명과 오디오파일명을 받아
- * 오디오 파일에 맞게 SDL_Thread를 생성해 오디오파일을 재생한다.
- * 그 후 SDL_Event를 기다리는 루프에 빠지는데
- * 루프내에서 종료를 알리는 이벤트를 감지하게되면 프로그램을 종료하는 함수이다.
- *
+ * 리눅스 터미널에서 오디오 파일명을 받아 SDL Thread를 초기화한 호, Thread를 생성하여 오디오 재생을 담당하는 함수 호출
  */
 int main(int argc, char **argv)
 {
-    SDL_Event event; //SDL_Event "event" 선언
-    audio_entry *audio; //오디오에 대한 정보를 담고있는 audio_entry 구조체의 사이즈 만큼 동적할당
+    SDL_Event event;
+    audio_entry *audio;
 
-    audio = (audio_entry *)av_mallocz(sizeof(audio_entry)); //"audio"에 audio_entry 구조체의 사이즈만큼 동적할당
+    audio = (audio_entry *)av_mallocz(sizeof(audio_entry));
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: test <file>\n"); //사용법 안내메시지 출력
+        fprintf(stderr, "Usage: test <file>\n");
         exit(1);
     }
 
-    av_register_all();/* 모든 libavformat을 초기화하고 muxers, demuxers, protocols 등
-                      오디오 재생에 필요한 요소들을 등록하고 내부의 avcodec_register_all()을 실행한다.
-                      avcodec_register_all()은 codecs, parser, bit stream filter등 오디오 코덱 관련 요소등을 등록한다.*/
+    av_register_all(); // codecs, parser, bit stream filter등 오디오 코덱 관련 요소들을 초기화
 
-    if (SDL_Init(SDL_INIT_AUDIO)) { //SDL 오디오 서브스트림을 초기화한다. 만약 초기화하는데 실패하면 1을 반환한다.
-        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError()); //SDL을 초기화 할 수 없었다는 에러 메시지 출력
+    if (SDL_Init(SDL_INIT_AUDIO)) { // SDL 오디오 서브스트림을 초기화
+        fprintf(stderr, "Could not initialize SDL - %s\n", SDL_GetError());
         exit(1);
     }
 
-    av_strlcpy(audio->filename, argv[1], sizeof(audio->filename));/*av_strlcpy는 ffmpeg에서 제공하는 strlcpy함수로써 기능은 서로 거의 같으며
-                                                                  메인의 두번째 매개변수를 "audio"의 filename 인자에 복사한다. */
+    av_strlcpy(audio->filename, argv[1], sizeof(audio->filename));
 
-    audio->thread_id = SDL_CreateThread(decode_thread, audio); //SDL쓰레드를 생성하여 반환값을 "audio"의 thread_id 인자에 대입한다.
-    if (!audio->thread_id) { //만일 "audio"의 thread_id가 0이면 즉, 쓰레드 생성이 비정상적인경우
+    audio->thread_id = SDL_CreateThread(decode_thread, audio);
+    if (!audio->thread_id) {
         av_free(audio);
         exit(1);
     }
