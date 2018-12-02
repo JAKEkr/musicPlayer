@@ -16,21 +16,19 @@ OBJDUMP         = $(CROSS_COMPILE)objdump
 LN				= ln -f
 CHMOD			= chmod
 
-CFLAGS += -I. -I/usr/local/include -g -Wall  -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_ISOC9X_SOURCE -std=c99
+CFLAGS += -I. -I/usr/local/include -g -Wall -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_ISOC9X_SOURCE -std=c99
 
-LDFLAGS += -lavdevice  -lswresample -lavformat -lavcodec -lavutil -lswscale -lGLU -lGL -lm -lz -lpthread -lX11 -lSDL
+LDFLAGS += -lavdevice -lswresample -lavformat -lavcodec -lavutil -lswscale -lGLU -lGL -lm -lz -lpthread -lX11 -lSDL
 
 SRC=$(wildcard *.c)
 OBJS=${SRC:%.c=%.o}
 NAME=${SRC:%.c=%}
 DEPS=$(SRC:%.c=.dep/%.d)
 
-.PHONY: dep  all
+.PHONY: dep all
 
 all: $(OBJS)
-	$(CC) -o $(TARGET) $(OBJS) $(LDFLAGS) 
-#	$(STRIP) $(TARGET)
-
+	$(CC) -o $(TARGET) $(OBJS) $(LDFLAGS)
 
 clean:
 	rm -rf *.o $(TARGET) .dep
@@ -39,7 +37,6 @@ clean:
 	${CC} ${CFLAGS} -c $<
 	@mkdir -p .dep
 	${CC} -MM $(CFLAGS) $*.c > .dep/$*.d 
-
 
 dep: 
 	@mkdir -p .dep
