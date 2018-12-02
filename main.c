@@ -322,8 +322,8 @@ int audio_decode_frame(audio_entry *audio)
 /*
  * void audio_callback(void *, Uint8 *, int)
  * 
- * 다른 함수로 부터 데이터를 끌어오는 간단한 루프로써 오디오 디바이스에 출력할 데이터가 필요하면 SDL_thread에서 콜백함수가 호출되고,
- *  audio_data_stream에 필요한 만큼의 데이터를 디코딩하여 전달하는 함수.
+ * SDL_thread에서 호출되는 콜백함수로 쓰레드 내에서 일정한 크기로 stream을 분할한 후,
+ * audio_decode_stream에 분할한 데이터와 함께 함수 호출을 돕는 함수.
  */
 void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
@@ -333,7 +333,7 @@ void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_b
 
     while (stream_buffer_length > 0) {
         if (audio->buffer_index >= audio->buffer_size) {
-            audio_data_size = audio_decode_frame(audio); // "audio"를 audio_decode_frame 함수에 넘겨 데이터 사이즈를 돌려받아 audio_data_size에 저장
+            audio_data_size = audio_decode_frame(audio);
 
             if(audio_data_size < 0) {
                 audio->buffer_size = 1024;
@@ -349,19 +349,18 @@ void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_b
         if (transport_buffer_length > stream_buffer_length)
             transport_buffer_length = stream_buffer_length;
 
-        // audio_data_stream에 "audio"에 저장된 버퍼의 내용을 transport_buffer_length만큼 전송
         memcpy(audio_data_stream, (uint8_t *)audio->buffer + audio->buffer_index, transport_buffer_length);
 
         stream_buffer_length -= transport_buffer_length;
         audio_data_stream += transport_buffer_length;
         audio->buffer_index += transport_buffer_length;
-    } // 루프를 돌며 stream에서 필요한 데이터 길이만큼 분할한 후, 디코딩하여 호출한 쓰레드로 데이터 전송
+    } // 루프를 돌며 stream에서 일정한 데이터 길이로 분할한 후, 디코딩 함수 호출
 }
 
 /* 
  * int stream_component_open(audio_entry *, int)
  * 
- * audio_entry구조체와 stream index를 매개변수로 받아 사운드 매개 변수 및 사운드 파일을 설정하는 함수
+ * 해당 코덱 정보가 담겨있는 stream index의 오디오 코덱 정보를 추출한 후, 사운드 매개 변수 및 사운드 파일을 설정하는 함수.
  */
 int stream_component_open(audio_entry *audio, int stream_index)
 {
@@ -370,7 +369,7 @@ int stream_component_open(audio_entry *audio, int stream_index)
     int64_t wanted_channel_layout = 0;				 
     int wanted_nb_channels;
     int nb_channels_layout;
-    const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; //이 배열을 사용하여 지원되지 않는 채널 수를 수정
+    const int next_nb_channels[] = {0, 0, 1 ,6, 2, 6, 4, 6}; // 이 배열을 사용하여 지원되지 않는 채널 수를 수정
 
     if (stream_index < 0 || stream_index >= audio_ctx->nb_streams)
         return -1; //오디오 코덱 없을 경우
@@ -390,26 +389,26 @@ int stream_component_open(audio_entry *audio, int stream_index)
 		return -1;
 	}
 
-	/* 오디오 정보를 담는 구조체 설정 */
+	// 오디오 정보를 담는 구조체 설정
 	wanted_spec.format = AUDIO_S16SYS;		
 	wanted_spec.silence = 0;			
 	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;	
-	wanted_spec.callback = audio_callback;		//오디오 버퍼를 채우는 콜백함수
+	wanted_spec.callback = audio_callback; //오디오 버퍼를 채우는 콜백함수
 	wanted_spec.userdata = audio;			
 	
-	/* 
-	    실패시 출력 
-	    SDL_OpenAudio(SDL_AudioSpec* desired, SDL_AudioSpec* obtained) : 오디오 장치를 원하는 매개 변수로 열고, 성공하면 0 실패 시 음수 오류 코드 반환
-    */
 	while(SDL_OpenAudio(&wanted_spec, &spec) < 0) {	//오디오 장치 열기 실패 시
+
 		fprintf(stderr, "SDL_OpenAudio (%d channels): %s\n", wanted_spec.channels, SDL_GetError());
+
 		wanted_spec.channels = next_nb_channels[FFMIN(7, wanted_spec.channels)];	//FFMIN() : ffmpeg에 의해 정의 된 매크로로 더 작은 수를 반환
+
 		if(!wanted_spec.channels) {
 			fprintf(stderr, "No more channel combinations to try, audio open failed\n");
 			return -1;
 		}
+
 		wanted_channel_layout = av_get_default_channel_layout(wanted_spec.channels);
-	}
+	} // 실패시 오디오 장치를 원하는 매개 변수로 열고, 성공하면 0 실패 시 음수 오류 코드 반환
 
 	if (spec.format != AUDIO_S16SYS) { //형식이 지원 안 될 경우
 		fprintf(stderr, "SDL advised audio format %d is not supported!\n", spec.format);
@@ -417,26 +416,28 @@ int stream_component_open(audio_entry *audio, int stream_index)
 	}
 
 	if (spec.channels != wanted_spec.channels) { //출력하고자 하는 채널과 실제 매개 변수의 채널이 다를 경우
+
 		wanted_channel_layout = av_get_default_channel_layout(spec.channels);
+
 		if (!wanted_channel_layout) {
 			fprintf(stderr, "SDL advised channel count %d is not supported!\n", spec.channels);
 			return -1;
 		}
 	}
 
-	/* 원하는 출력 형식을 나타내는 구조체의 정보 에러 출력*/ 
+	// 원하는 출력 형식을 나타내는 구조체의 정보 에러 출력
 	fprintf(stderr, "%d: wanted_spec.format = %d\n", __LINE__, wanted_spec.format);		//__LINE__ : 현재 소스 파일의 줄번호
 	fprintf(stderr, "%d: wanted_spec.samples = %d\n", __LINE__, wanted_spec.samples);
 	fprintf(stderr, "%d: wanted_spec.channels = %d\n", __LINE__, wanted_spec.channels);
 	fprintf(stderr, "%d: wanted_spec.freq = %d\n", __LINE__, wanted_spec.freq);
 
-	/* 실제 매개 변수로 채워지는 구조체의 정보 에러 출력 */
+	// 실제 매개 변수로 채워지는 구조체의 정보 에러 출력
 	fprintf(stderr, "%d: spec.format = %d\n", __LINE__, spec.format);
 	fprintf(stderr, "%d: spec.samples = %d\n", __LINE__, spec.samples);
 	fprintf(stderr, "%d: spec.channels = %d\n", __LINE__, spec.channels);
 	fprintf(stderr, "%d: spec.freq = %d\n", __LINE__, spec.freq);
 
-	/* 설정된 매개변수를 구조체에 저장 */
+	// 설정된 매개변수를 구조체에 저장
 	audio->source_format = audio->target_format = AV_SAMPLE_FMT_S16;
 	audio->source_samplerate = audio->target_samplerate = spec.freq;
 	audio->source_channel_layout = audio->target_channel_layout = wanted_channel_layout;
@@ -528,7 +529,7 @@ static int decode_thread(void *st_audio_entry)
         return -1;
     }
 
-    codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id);
+    codec = avcodec_find_decoder(audio_ctx->streams[audio->stream_index]->codecpar->codec_id); // 오디오 코덱의 아이디와 일치하는 코덱을 찾는다 
     
     if (!codec) {
 		fprintf(stderr, "Failed to find decoder for stream #%u\n", audio->stream_index);
