@@ -67,41 +67,43 @@ void packet_queue_init(PacketQueue *q)
     q->cond = SDL_CreateCond();
 }
 
-int packet_queue_put(PacketQueue *q, AVPacket *pkt)
+int packet_queue_put(PacketQueue *q, AVPacket *packet)
 {
-    AVPacketList *pkt1;
+    AVPacketList *packet_list;
 
-    pkt1 = (AVPacketList *)av_malloc(sizeof(AVPacketList));
-    if (!pkt1) {
+    packet_list = (AVPacketList *)av_malloc(sizeof(AVPacketList));
+
+    if (!packet_list)
         return -1;
-    }
-    pkt1->pkt = *pkt;
-    pkt1->next = NULL;
+
+    packet_list->pkt = *packet;
+    packet_list->next = NULL;
 
     SDL_LockMutex(q->mutex);
 
-    if (!q->last_pkt) {
-        q->first_pkt = pkt1;
-    } else {
-        q->last_pkt->next = pkt1;
-    }
+    if (!q->last_pkt)
+        q->first_pkt = packet_list;
+    else
+        q->last_pkt->next = packet_list;
 
-    q->last_pkt = pkt1;
+    q->last_pkt = packet_list;
     q->nb_packets++;
-    q->size += pkt1->pkt.size;
+    q->size += packet_list->pkt.size;
+
     SDL_CondSignal(q->cond);
     SDL_UnlockMutex(q->mutex);
+
     return 0;
 }
 
-static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block)
+static int packet_queue_get(PacketQueue *q, AVPacket *packet, int block)
 {
-    AVPacketList *pkt1;
+    AVPacketList *packet_list;
     int ret;
 
     SDL_LockMutex(q->mutex);
 
-    for(;;) {
+    while(TRUE) {
 
         // FIXME: Not working
         /*
@@ -111,25 +113,27 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block)
         }
         */
 
-        pkt1 = q->first_pkt;
-        if (pkt1) {
-            q->first_pkt = pkt1->next;
-            if (!q->first_pkt) {
-                q->last_pkt = NULL;
-            }
-            q->nb_packets--;
-            q->size -= pkt1->pkt.size;
-            *pkt = pkt1->pkt;
+        packet_list = q->first_pkt;
 
-            av_free(pkt1);
+        if (packet_list) {
+            q->first_pkt = packet_list->next;
+
+            if (!q->first_pkt)
+                q->last_pkt = NULL;
+
+            q->nb_packets--;
+            q->size -= packet_list->pkt.size;
+            *packet = packet_list->pkt;
+
+            av_free(packet_list);
             ret = 1;
+
             break;
         } else if (!block) {
             ret = 0;
             break;
-        } else {
+        } else
             SDL_CondWait(q->cond, q->mutex);
-        }
     }
 
     SDL_UnlockMutex(q->mutex);
@@ -142,15 +146,18 @@ static void packet_queue_flush(PacketQueue *q)
     AVPacketList *pkt, *pkt1;
 
     SDL_LockMutex(q->mutex);
+
     for (pkt = q->first_pkt; pkt != NULL; pkt = pkt1) {
         pkt1 = pkt->next;
         av_packet_unref(&pkt->pkt);
         av_freep(&pkt);
     }
+
     q->last_pkt = NULL;
     q->first_pkt = NULL;
     q->nb_packets = 0;
     q->size = 0;
+
     SDL_UnlockMutex(q->mutex);
 }
 
@@ -538,6 +545,8 @@ static int decode_thread(void *st_audio_entry)
     }
 
     stream_component_open(audio, audio_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
+
+    packet = (AVPacket *)malloc(sizeof(AVPacket));
 
     // main decode loop
     while(TRUE) {
