@@ -542,6 +542,11 @@ static int decode_thread(void *st_audio_entry)
         return -1;
     }
 
+    if (avcodec_open2(audio->codec_ctx, codec, NULL) < 0) {
+        fprintf(stderr, "Could not open codec\n");
+        return -1;
+    }
+
     stream_component_open(audio, audio->stream_index); // 추가 설정 후, 별도의 쓰레드로 오디오 재생
 
     packet = (AVPacket *)malloc(sizeof(AVPacket));
