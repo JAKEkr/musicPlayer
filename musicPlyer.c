@@ -9,7 +9,7 @@
  *  @Created : Fri Oct 12 21:23:55 2018 +0900 by JAKEkr
  *  @Updated : Sun Dec 2 18:59:39 2018 +0900 by imsseong
  * 
- *  @Licence : GPLv2.0
+ *  @License : GPLv2.0
  * 
  *  musicPlayer는 Linux 기반의 콘솔 음악 재생 프로그램입니다.
  *  본 프로그램은 세종대학교 오픈소스SW개론 수업의 팀프로젝트 용도로 개발되었습니다.
