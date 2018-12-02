@@ -179,17 +179,12 @@ int get_size_of_sample_buffer_per_channel(audio_entry *audio)
 	return sizeof(audio->temp_buffer) / audio->target_channels / av_get_bytes_per_sample(audio->target_format);
 }
 
-
 /*
  * int audio_decode_frame(audio_entry *)
  *
- * Decode one audio frame and return its uncompressed size
- *
- * The processed audio frame is decoded, counverted if required, and
- * stored in audio->audio_buf, with size in bytes given by the return value.
+ * 넘겨받은 오디오 프레임을 디코딩 한 후, 사운드 출력을 하는 함수
  * 
- * audio : 오디오 파일 상태 정보를 담고 있는 변수
- * 
+ * 리턴값: 정상 동작시 디코딩된 오디오 프레임 사이즈 반환
  */
 int audio_decode_frame(audio_entry *audio)
 {
@@ -322,8 +317,7 @@ int audio_decode_frame(audio_entry *audio)
 /*
  * void audio_callback(void *, Uint8 *, int)
  * 
- * SDL_thread에서 호출되는 콜백함수로 쓰레드 내에서 일정한 크기로 stream을 분할한 후,
- * audio_decode_stream에 분할한 데이터와 함께 함수 호출을 돕는 함수.
+ * SDL_thread에서 호출되는 콜백함수로 쓰레드 내에서 일정한 크기로 stream을 분할한 후, audio_decode_stream에 분할한 데이터와 함께 함수 호출을 돕는 함수.
  */
 void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_buffer_length)
 {
@@ -361,6 +355,8 @@ void audio_callback(void *st_audio_entry, Uint8 *audio_data_stream, int stream_b
  * int stream_component_open(audio_entry *, int)
  * 
  * 해당 코덱 정보가 담겨있는 stream index의 오디오 코덱 정보를 추출한 후, 사운드 매개 변수 및 사운드 파일을 설정하는 함수.
+ * 
+ * 리턴값: 정상적인 종료시 0, 에러 혹은 충돌에 의한 비정상적인 종료시 -1 반환
  */
 int stream_component_open(audio_entry *audio, int stream_index)
 {
@@ -443,26 +439,17 @@ int stream_component_open(audio_entry *audio, int stream_index)
 	audio->source_channel_layout = audio->target_channel_layout = wanted_channel_layout;
 	audio->source_channels = audio->target_channels = spec.channels;
     
-    //codec = avcodec_find_decoder(codec_ctx->codec_id); // avcodec_find_decoder(enum AVCodecID id) : 일치하는 코덱 id가 있는 등록 된 디코더를 찾는다 
-    /* 
-       avcodec_open2(AVCodecContext구조체, 방금찾은 AVCodec구조체, Decoder초기화에 필요한 추가옵션) 
-       : 만일 디코더 정보가 존재한다면, AVCodecContext에 해당 정보를 넘겨줘서 디코더로 초기화 
-    */
-    if (!audio->codec_ctx->codec || (avcodec_open2(audio->codec_ctx, audio->codec_ctx->codec, NULL) < 0)) { //지원되지 않는 코덱이거나 디코더 정보 없으면
-        fprintf(stderr, "Unsupported codec!\n");
-        return -1;
-    }
-
 	audio_ctx->streams[stream_index]->discard = AVDISCARD_DEFAULT; //AVDISCARD_DEFAULT : avi에서 0 크기 패킷과 같은 쓸데없는 패킷을 버린다
+
     switch(audio->codec_ctx->codec_type) {
-    case AVMEDIA_TYPE_AUDIO:					//패킷 생성을 위한 각종 초기화
+    case AVMEDIA_TYPE_AUDIO:					                //패킷 생성을 위한 각종 초기화
         audio->stream_index = stream_index;
         audio->stream = audio_ctx->streams[stream_index];
         audio->buffer_size = 0;
         audio->buffer_index = 0;
         memset(&audio->packet, 0, sizeof(audio->packet));		//오디오 패킷만큼 동적할당
-        packet_queue_init(&audio->queue);				//패킷큐 생성 후 링크
-        SDL_PauseAudio(0);					//실질적으로 재생하는 부분, 인자가 0이면 재생
+        packet_queue_init(&audio->queue);			        	//패킷큐 생성 후 링크
+        SDL_PauseAudio(0);					                    //실질적으로 재생하는 부분, 인자가 0이면 재생
         break;
     default:
         break;
@@ -471,6 +458,13 @@ int stream_component_open(audio_entry *audio, int stream_index)
     return 0;
 }
 
+/*
+ * int quit_thread(audio_entry *, int);
+ * 
+ * 넘겨받은 이벤트 번호로 이벤트를 생성하여, 정상적인 종료를 유도하는 함수
+ * 
+ * 리턴값: 정상적인 이벤트 생성시 1, 이벤트 생성에 실패시 0 반환
+ */
 int quit_thread(audio_entry *st_audio_entry, int event_number)
 {
     SDL_Event event;
@@ -490,7 +484,7 @@ int quit_thread(audio_entry *st_audio_entry, int event_number)
  * 전달 받은 파일을 오픈하고 헤더 정보를 가져온 뒤, 오디오 코덱이 있는 스트림을 찾아 오디오를
  * 재생시키는 별도의 쓰레드를 동작시킨 후, 해당 스트림과 일치하는 패킷을 찾아 오디오 큐에 입력하는 함수.
  * 
- * 리턴값: 정상적인 종료시 0, 에러 혹은 충돌에 의한 비정상적인 종료시 -1
+ * 리턴값: 정상적인 종료시 0, 에러 혹은 충돌에 의한 비정상적인 종료시 -1 반환
  */
 static int decode_thread(void *st_audio_entry)
 {
@@ -559,7 +553,6 @@ static int decode_thread(void *st_audio_entry)
 
     packet = (AVPacket *)malloc(sizeof(AVPacket));
 
-    // main decode loop
     while(TRUE) {
         if(audio->state)
             break; // 다른 쓰레드에서 종료 요청이 들어왔는지 검사
