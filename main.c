@@ -1,4 +1,25 @@
-﻿#include <libavcodec/avcodec.h>
+﻿/*
+ *  musicPlayer.c
+ * 
+ *  Copyright (C) 2018 OSS Sejong Univ. All Rights Reserved.
+ *   
+ *  @Author : JAKEkr, Kuril951, rhgo1749, imsseong
+ *  @Link   : https://github.com/JAKEkr/musicPlayer.git
+ * 
+ *  @Created : Fri Oct 12 21:23:55 2018 +0900 by JAKEkr
+ *  @Updated : Sun Dec 2 18:59:39 2018 +0900 by imsseong
+ * 
+ *  @Licence : GPLv2.0
+ * 
+ *  musicPlayer는 Linux 기반의 콘솔 음악 재생 프로그램입니다.
+ *  본 프로그램은 세종대학교 오픈소스SW개론 수업의 팀프로젝트 용도로 개발되었습니다.
+ * 
+ *  사용법 : ./player [AUDIO_FILE]
+ * 
+ *  Wrtied by JAKEkr <secujake@gmail.com>
+ */
+
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
@@ -56,9 +77,6 @@ typedef struct audio_entry
     SDL_Thread      *thread_id;
     int             state;
 } audio_entry;
-
-// HACK: Not used
-// VideoState *global_video_state;
 
 void packet_queue_init(PacketQueue *q)
 {
