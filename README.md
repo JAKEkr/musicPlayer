@@ -62,13 +62,13 @@ SDL
 
 ## 정보
 
-이종진 / JAKEkr <secjujake@gmail.com>
+이종진 / JAKEkr   \<secjujake@gmail.com\>
 
-김태우 / Kuril951 <viodle238@naver.com>
+김태우 / Kuril951 \<viodle238@naver.com\>
 
-고대훈 / rhgo1749 <rhgo1749@naver.com>
+고대훈 / rhgo1749 \<rhgo1749@naver.com\>
 
-홍성임 / imsseong <sung325@gmail.com>
+홍성임 / imsseong \<hsung325@gmail.com\>
 
 
 
@@ -78,7 +78,7 @@ SDL
 
 2. (`git checkout -b feat/fooBar`) 명령어로 새 브랜치를 만드세요.
 
-3. (`git commit -am 'Add some fooBar'`) 명령어로 커밋하세요.
+3. (`git commit -m 'Add some fooBar'`) 명령어로 커밋하세요.
 
 4. (`git push origin feat/fooBar`) 명령어로 브랜치에 푸시하세요. 
 
@@ -88,4 +88,4 @@ SDL
 
 ## 도움을 주신 분
 
-장문정 교수님 / cathmjjang <mjjang@sejong.ac.kr>
+장문정 교수님 / cathmjjang \<mjjang@sejong.ac.kr\>
